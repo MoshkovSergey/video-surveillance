@@ -37,6 +37,7 @@ func NewHandler(pool *pgxpool.Pool, cameraRepo *postgres.CameraRepository, logge
 	mux.HandleFunc("POST /api/v1/cameras", h.handleCreateCamera)
 	mux.HandleFunc("GET /api/v1/cameras", h.handleListCameras)
 	mux.HandleFunc("GET /api/v1/cameras/{id}", h.handleGetCamera)
+	mux.HandleFunc("GET /api/v1/cameras/{id}/stream", h.handleGetCameraStream)
 	mux.HandleFunc("PATCH /api/v1/cameras/{id}", h.handleUpdateCamera)
 	mux.HandleFunc("DELETE /api/v1/cameras/{id}", h.handleDeleteCamera)
 

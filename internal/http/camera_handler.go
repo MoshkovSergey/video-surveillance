@@ -3,6 +3,7 @@ package httpapi
 import (
 	"encoding/json"
 	"net/http"
+	"fmt"
 
 	"github.com/google/uuid"
 
@@ -172,4 +173,41 @@ func (h *Handler) handleDeleteCamera(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleGetCameraStream возвращает URL для подключения к видеопотоку через MediaMTX.
+func (h *Handler) handleGetCameraStream(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid camera id"})
+		return
+	}
+
+	cam, err := h.cameraRepo.GetByID(r.Context(), id)
+	if err != nil {
+		h.logger.Error("failed to get camera for stream", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		return
+	}
+	if cam == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "camera not found"})
+		return
+	}
+
+	// В продакшене хост и порты нужно брать из конфига.
+	// Для локальной разработки используем localhost и стандартные порты MediaMTX.
+	host := "localhost"
+	
+	// Используем префикс cam_ чтобы избежать коллизий путей в MediaMTX
+	pathID := fmt.Sprintf("cam_%s", cam.ID.String())
+
+	streamInfo := map[string]string{
+		"camera_id":  cam.ID.String(),
+		"rtsp_url":   fmt.Sprintf("rtsp://%s:8554/%s", host, pathID),
+		"hls_url":    fmt.Sprintf("http://%s:8888/%s/index.m3u8", host, pathID),
+		"webrtc_url": fmt.Sprintf("http://%s:8889/%s", host, pathID),
+	}
+
+	writeJSON(w, http.StatusOK, streamInfo)
 }
