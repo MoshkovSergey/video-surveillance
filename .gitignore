@@ -1,0 +1,38 @@
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Binaries
+/bin/
+/tmp/
+/out/
+*.exe
+*.test
+*.out
+
+# Go
+vendor/
+
+# Node / React
+web/node_modules/
+web/dist/
+web/.vite/
+web/coverage/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Storage
+/storage/*
+!/storage/.gitkeep
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
