@@ -43,7 +43,8 @@ func main() {
 
 	logger.Info("database connection established")
 
-	handler := httpapi.NewHandler(pool, logger)
+	cameraRepo := postgres.NewCameraRepository(pool)
+	handler := httpapi.NewHandler(pool, cameraRepo, logger)
 
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,
