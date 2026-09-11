@@ -7,14 +7,12 @@ interface VideoPlayerProps {
 
 export default function VideoPlayer({ src }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
-  // Отдельный ref для хранения экземпляра hls.js
   const hlsRef = useRef<Hls | null>(null);
 
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
 
-    // Уничтожаем предыдущий экземпляр при смене источника или размонтировании
     if (hlsRef.current) {
       hlsRef.current.destroy();
       hlsRef.current = null;
@@ -22,15 +20,13 @@ export default function VideoPlayer({ src }: VideoPlayerProps) {
 
     if (Hls.isSupported()) {
       const hls = new Hls({
-        lowLatencyMode: true, // Пытаемся минимизировать задержку
+        lowLatencyMode: true, // минимизация задержки
       });
       hls.loadSource(src);
       hls.attachMedia(video);
-      
-      // Сохраняем ссылку в ref
+
       hlsRef.current = hls;
 
-      // Функция очистки при размонтировании компонента или смене src
       return () => {
         hls.destroy();
         hlsRef.current = null;
@@ -42,13 +38,13 @@ export default function VideoPlayer({ src }: VideoPlayerProps) {
   }, [src]);
 
   return (
-    <video 
-      ref={videoRef} 
-      controls 
-      autoPlay 
-      muted // Браузеры блокируют автоплей со звуком
+    <video
+      ref={videoRef}
+      className="video-frame"
+      controls
+      autoPlay
+      muted // браузеры блокируют автоплей со звуком
       playsInline
-      style={{ width: '100%', maxHeight: '70vh', backgroundColor: '#000', borderRadius: '8px' }} 
     />
   );
 }

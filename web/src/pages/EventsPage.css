@@ -1,21 +1,29 @@
 .severity-badge {
   display: inline-block;
-  padding: 4px 8px;
-  border-radius: 4px;
-  color: #ffffff;
-  font-size: 0.85rem;
-  font-weight: 500;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  border: 1px solid;
 }
 
 .sev-info {
-  background-color: #17a2b8;
+  color: #67e8f9;
+  border-color: rgba(6, 182, 212, 0.5);
+  background: rgba(6, 182, 212, 0.12);
+  box-shadow: 0 0 12px rgba(6, 182, 212, 0.25);
 }
 
 .sev-warning {
-  background-color: #ffc107;
-  color: #212529;
+  color: #fcd34d;
+  border-color: rgba(245, 158, 11, 0.5);
+  background: rgba(245, 158, 11, 0.12);
+  box-shadow: 0 0 12px rgba(245, 158, 11, 0.25);
 }
 
 .sev-critical {
-  background-color: #dc3545;
+  color: #fca5a5;
+  border-color: rgba(239, 68, 68, 0.55);
+  background: rgba(239, 68, 68, 0.14);
+  box-shadow: 0 0 14px rgba(239, 68, 68, 0.35);
 }

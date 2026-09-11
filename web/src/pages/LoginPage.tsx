@@ -30,35 +30,40 @@ export default function LoginPage() {
 
   return (
     <div className="login-page">
-      <form className="login-card" onSubmit={handleSubmit}>
-        <h1>Система видеонаблюдения</h1>
-        <p className="login-subtitle">Вход в систему</p>
+      <div className="login-card">
+        <div className="login-logo">
+          <span className="logo-mark">VS</span>
+        </div>
+        <h1 className="login-title">Система видеонаблюдения</h1>
+        <p className="login-subtitle">Вход в защищённый контур</p>
 
-        <label>
-          Имя пользователя
-          <input
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            autoComplete="username"
-            required
-          />
-        </label>
+        <form className="login-form" onSubmit={handleSubmit}>
+          <label>
+            Имя пользователя
+            <input
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              autoComplete="username"
+              required
+            />
+          </label>
 
-        <label>
-          Пароль
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete="current-password"
-            required
-          />
-        </label>
+          <label>
+            Пароль
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="current-password"
+              required
+            />
+          </label>
 
-        <button type="submit" disabled={submitting}>
-          {submitting ? 'Вход...' : 'Войти'}
-        </button>
-      </form>
+          <button type="submit" disabled={submitting}>
+            {submitting ? 'Входим...' : 'Войти'}
+          </button>
+        </form>
+      </div>
     </div>
   );
 }

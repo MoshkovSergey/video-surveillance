@@ -13,19 +13,6 @@ const statusLabels: Record<CameraStatus, string> = {
   error: 'нет связи',
 };
 
-const getStatusColor = (status: CameraStatus): string => {
-  switch (status) {
-    case 'enabled':
-      return '#28a745';
-    case 'disabled':
-      return '#6c757d';
-    case 'error':
-      return '#dc3545';
-    default:
-      return '#000000';
-  }
-};
-
 export default function CameraListPage() {
   const queryClient = useQueryClient();
   const notify = useToast();
@@ -114,10 +101,7 @@ export default function CameraListPage() {
               <td>{cam.name}</td>
               <td>{cam.location || '—'}</td>
               <td>
-                <span
-                  className="status-badge"
-                  style={{ backgroundColor: getStatusColor(cam.status) }}
-                >
+                <span className={`status-badge status-${cam.status}`}>
                   {statusLabels[cam.status] ?? cam.status}
                 </span>
               </td>

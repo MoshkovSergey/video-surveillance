@@ -1,99 +1,454 @@
-/* Форма создания камеры */
-.camera-form {
-  background: #ffffff;
-  padding: 20px;
+@import url('https://fonts.googleapis.com/css2?family=Unbounded:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap');
+
+:root {
+  --bg: #05060f;
+  --bg-soft: #0b0d1c;
+  --glass: rgba(255, 255, 255, 0.04);
+  --border: rgba(255, 255, 255, 0.09);
+  --border-accent: rgba(124, 58, 237, 0.45);
+  --text: #e6e8f0;
+  --muted: #8b93a7;
+  --violet: #7c3aed;
+  --cyan: #06b6d4;
+  --pink: #ec4899;
+  --success: #22c55e;
+  --danger: #ef4444;
+  --warning: #f59e0b;
+  --grad: linear-gradient(135deg, var(--violet) 0%, var(--cyan) 100%);
+  --grad-hot: linear-gradient(135deg, var(--pink) 0%, var(--violet) 100%);
+  --radius: 16px;
+  --font-display: 'Unbounded', 'Space Grotesk', sans-serif;
+  --font-body: 'Space Grotesk', 'Inter', sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100vh;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-body);
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Аврора-свечения на фоне */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  background:
+    radial-gradient(600px 400px at 12% -5%, rgba(124, 58, 237, 0.28), transparent 60%),
+    radial-gradient(700px 450px at 88% 8%, rgba(6, 182, 212, 0.2), transparent 60%),
+    radial-gradient(800px 500px at 50% 110%, rgba(236, 72, 153, 0.16), transparent 60%);
+  filter: blur(10px);
+}
+
+/* Тонкая технологичная сетка */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, #000 30%, transparent 75%);
+}
+
+::selection {
+  background: rgba(124, 58, 237, 0.45);
+  color: #ffffff;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(124, 58, 237, 0.6), rgba(6, 182, 212, 0.6));
   border-radius: 8px;
-  margin-bottom: 24px;
-  display: grid;
-  gap: 12px;
-  max-width: 560px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
-.camera-form h2 {
-  margin: 0 0 4px 0;
-  font-size: 1.2rem;
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 32px 24px 64px;
 }
 
-.camera-form label {
-  display: grid;
-  gap: 4px;
-  font-size: 0.9rem;
-  color: #444444;
+h1,
+h2 {
+  font-family: var(--font-display);
+  letter-spacing: 0.01em;
 }
 
-.camera-form input {
-  padding: 8px 10px;
-  border: 1px solid #cccccc;
-  border-radius: 4px;
-  font-size: 1rem;
+h1 {
+  font-size: 2rem;
+  margin: 0 0 24px;
+  padding-bottom: 12px;
+  position: relative;
+  background: linear-gradient(90deg, #ffffff 0%, #c4b5fd 45%, #67e8f9 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 
+h1::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 72px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--grad);
+  box-shadow: 0 0 14px rgba(124, 58, 237, 0.8);
+}
+
+h2 {
+  font-size: 1.15rem;
+  color: var(--text);
+}
+
+/* ---------- Стеклянные панели ---------- */
+
+.camera-table,
+.camera-form,
+.archive-player,
+.stream-info {
+  background: var(--glass);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  backdrop-filter: blur(14px);
+}
+
+/* ---------- Таблицы ---------- */
+
+.camera-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow: hidden;
+  box-shadow: 0 10px 40px rgba(3, 4, 12, 0.5);
+}
+
+.camera-table th,
+.camera-table td {
+  padding: 14px 18px;
+  text-align: left;
+}
+
+.camera-table th {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid var(--border);
+}
+
+.camera-table td {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  font-size: 0.95rem;
+}
+
+.camera-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.camera-table tbody tr {
+  transition: background 0.2s;
+}
+
+.camera-table tbody tr:hover {
+  background: rgba(124, 58, 237, 0.1);
+}
+
+/* ---------- Бейджи статусов ---------- */
+
+.status-badge {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 999px;
+  color: #ffffff;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+
+.status-enabled {
+  background: linear-gradient(135deg, #16a34a, #22c55e);
+  box-shadow: 0 0 16px rgba(34, 197, 94, 0.45);
+}
+
+.status-disabled {
+  background: linear-gradient(135deg, #475569, #64748b);
+  box-shadow: 0 0 12px rgba(100, 116, 139, 0.35);
+}
+
+.status-error {
+  background: linear-gradient(135deg, #dc2626, #ef4444);
+  animation: pulse-danger 1.6s infinite;
+}
+
+@keyframes pulse-danger {
+  0%,
+  100% {
+    box-shadow: 0 0 10px rgba(239, 68, 68, 0.35);
+  }
+  50% {
+    box-shadow: 0 0 22px rgba(239, 68, 68, 0.75);
+  }
+}
+
+/* ---------- Кнопки ---------- */
+
+.btn-view,
+.btn-delete,
+.btn-small,
+.btn-back,
 .camera-form button {
-  justify-self: start;
-  padding: 10px 16px;
-  background-color: #28a745;
-  color: #ffffff;
+  display: inline-block;
+  padding: 8px 14px;
   border: none;
-  border-radius: 4px;
-  font-size: 1rem;
+  border-radius: 10px;
+  font-family: var(--font-body);
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #ffffff;
   cursor: pointer;
+  text-decoration: none;
+  transition: transform 0.15s, box-shadow 0.2s, filter 0.2s;
 }
 
+.btn-view,
+.btn-small,
+.camera-form button {
+  background: var(--grad);
+  box-shadow: 0 4px 18px rgba(124, 58, 237, 0.35);
+}
+
+.btn-view:hover,
+.btn-small:hover:not(:disabled),
 .camera-form button:hover:not(:disabled) {
-  background-color: #218838;
+  filter: brightness(1.12);
+  transform: translateY(-1px);
 }
 
-.camera-form button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-/* Кнопка удаления */
 .btn-delete {
+  background: var(--grad-hot);
+  box-shadow: 0 4px 18px rgba(236, 72, 153, 0.35);
   margin-left: 8px;
-  background-color: #dc3545;
-  color: #ffffff;
-  border: none;
-  padding: 6px 12px;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: background-color 0.2s;
 }
 
 .btn-delete:hover:not(:disabled) {
-  background-color: #b02a37;
+  filter: brightness(1.12);
+  transform: translateY(-1px);
 }
 
-.btn-delete:disabled {
-  opacity: 0.6;
+.btn-back {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border);
+}
+
+.btn-secondary {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--border);
+  box-shadow: none;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  filter: brightness(1.15);
+}
+
+button:disabled {
+  opacity: 0.55;
   cursor: not-allowed;
 }
 
-/* Уведомления */
+.link-download {
+  color: #67e8f9;
+  text-decoration: none;
+}
+
+.link-download:hover {
+  text-decoration: underline;
+}
+
+/* ---------- Формы и контролы ---------- */
+
+.camera-form {
+  padding: 24px;
+  display: grid;
+  gap: 14px;
+  max-width: 560px;
+  margin-bottom: 28px;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 10px 40px rgba(3, 4, 12, 0.5);
+}
+
+.camera-form::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(120deg, rgba(124, 58, 237, 0.12), transparent 40%, rgba(6, 182, 212, 0.1));
+  pointer-events: none;
+}
+
+.camera-form h2 {
+  margin: 0;
+}
+
+.camera-form label,
+.archive-controls label {
+  display: grid;
+  gap: 6px;
+  font-size: 0.8rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.camera-form input,
+.archive-controls select,
+.archive-controls input {
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 1rem;
+  font-family: var(--font-body);
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.camera-form input:focus,
+.archive-controls select:focus,
+.archive-controls input:focus {
+  border-color: var(--border-accent);
+  box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.22);
+}
+
+select option {
+  background: var(--bg-soft);
+  color: var(--text);
+}
+
+.archive-controls {
+  display: flex;
+  gap: 16px;
+  align-items: end;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+/* ---------- Видео ---------- */
+
+.archive-player {
+  margin-bottom: 20px;
+  overflow: hidden;
+  box-shadow: 0 0 0 1px var(--border), 0 0 34px rgba(124, 58, 237, 0.25);
+}
+
+.archive-player video,
+.video-frame {
+  width: 100%;
+  max-height: 64vh;
+  display: block;
+  background: #000000;
+}
+
+.video-container {
+  border-radius: var(--radius);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  box-shadow: 0 0 34px rgba(6, 182, 212, 0.18);
+  margin-bottom: 20px;
+}
+
+.view-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.stream-info {
+  padding: 18px 20px;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.stream-info p {
+  margin: 6px 0;
+}
+
+.stream-info strong {
+  color: var(--text);
+}
+
+/* ---------- Уведомления ---------- */
+
 .toast-container {
   position: fixed;
   top: 16px;
   right: 16px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   z-index: 1000;
 }
 
 .toast {
+  min-width: 280px;
   padding: 12px 16px;
-  border-radius: 6px;
-  color: #ffffff;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
-  min-width: 260px;
-  font-size: 0.95rem;
+  border-radius: 12px;
+  backdrop-filter: blur(14px);
+  background: rgba(11, 13, 28, 0.85);
+  border: 1px solid var(--border);
+  color: var(--text);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
 }
 
 .toast-success {
-  background-color: #28a745;
+  border-left: 3px solid var(--success);
+  box-shadow: 0 0 18px rgba(34, 197, 94, 0.25);
 }
 
 .toast-error {
-  background-color: #dc3545;
+  border-left: 3px solid var(--danger);
+  box-shadow: 0 0 18px rgba(239, 68, 68, 0.3);
+}
+
+/* ---------- Служебные состояния ---------- */
+
+.loading,
+.error {
+  padding: 28px;
+  text-align: center;
+  border-radius: var(--radius);
+  border: 1px dashed var(--border);
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.error {
+  color: #fca5a5;
+  border-color: rgba(239, 68, 68, 0.4);
 }

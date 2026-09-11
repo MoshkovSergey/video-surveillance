@@ -16,7 +16,11 @@ export default function Layout() {
   return (
     <div className="app-shell">
       <header className="app-header">
-        <span className="app-title">Система видеонаблюдения</span>
+        <div className="app-logo">
+          <span className="logo-mark">VS</span>
+          <span className="app-title">Система видеонаблюдения</span>
+        </div>
+
         <nav className="app-nav">
           <NavLink to="/" end>
             Камеры
@@ -28,7 +32,8 @@ export default function Layout() {
         <div className="app-header-right">
           {user && (
             <span className="app-user">
-              {user.username} · {roleLabels[user.role] ?? user.role}
+              <span className="user-name">{user.username}</span>
+              <span className="user-role">{roleLabels[user.role] ?? user.role}</span>
             </span>
           )}
           {user && (
