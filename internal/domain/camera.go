@@ -26,6 +26,17 @@ const (
 	SourceONVIF CameraSourceType = "onvif"
 )
 
+// RecordingMode определяет режим записи камеры.
+type RecordingMode string
+
+const (
+	// RecordingContinuous — непрерывная запись всех сегментов.
+	RecordingContinuous RecordingMode = "continuous"
+	// RecordingMotion — в архив сохраняются только эпизоды движения,
+	// остальное хранится в коротком буфере и удаляется.
+	RecordingMotion RecordingMode = "motion"
+)
+
 // ONVIFParams — параметры подключения к ONVIF-устройству.
 type ONVIFParams struct {
 	Host     string `json:"host"`
@@ -37,22 +48,23 @@ type ONVIFParams struct {
 
 // Camera представляет камеру видеонаблюдения.
 type Camera struct {
-	ID         uuid.UUID        `json:"id"`
-	Name       string           `json:"name"`
-	RTSPUri    string           `json:"rtsp_uri"`
-	Location   string           `json:"location,omitempty"`
-	FireZoneID *uuid.UUID       `json:"fire_zone_id,omitempty"`
-	Status     CameraStatus     `json:"status"`
-	SourceType CameraSourceType `json:"source_type"`
-	ONVIF      *ONVIFParams     `json:"onvif,omitempty"`
-	Config     map[string]any   `json:"config"`
-	CreatedAt  time.Time        `json:"created_at"`
-	UpdatedAt  time.Time        `json:"updated_at"`
+	ID              uuid.UUID        `json:"id"`
+	Name            string           `json:"name"`
+	RTSPUri         string           `json:"rtsp_uri"`
+	Location        string           `json:"location,omitempty"`
+	FireZoneID      *uuid.UUID       `json:"fire_zone_id,omitempty"`
+	Status          CameraStatus     `json:"status"`
+	SourceType      CameraSourceType `json:"source_type"`
+	ONVIF           *ONVIFParams     `json:"onvif,omitempty"`
+	RecordingMode   RecordingMode    `json:"recording_mode"`
+	MotionDetection bool             `json:"motion_detection"`
+	Config          map[string]any   `json:"config"`
+	CreatedAt       time.Time        `json:"created_at"`
+	UpdatedAt       time.Time        `json:"updated_at"`
 }
 
 // NormalizeRTSPUri percent-кодирует символы, которые не могут присутствовать
-// в RTSP-URL в сыром виде. Символ '#' начинается фрагмент URL, который
-// потоковые серверы отвергают, поэтому он всегда передаётся как %23.
+// в RTSP-URL в сыром виде.
 func NormalizeRTSPUri(raw string) string {
 	return strings.ReplaceAll(strings.TrimSpace(raw), "#", "%23")
 }
@@ -82,6 +94,13 @@ func (c *Camera) Validate() error {
 	}
 	if c.SourceType != SourceRTSP && c.SourceType != SourceONVIF {
 		return fmt.Errorf("invalid source type: %s", c.SourceType)
+	}
+
+	if c.RecordingMode == "" {
+		c.RecordingMode = RecordingContinuous
+	}
+	if c.RecordingMode != RecordingContinuous && c.RecordingMode != RecordingMotion {
+		return fmt.Errorf("invalid recording mode: %s", c.RecordingMode)
 	}
 
 	switch c.Status {

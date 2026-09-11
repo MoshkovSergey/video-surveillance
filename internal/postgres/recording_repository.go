@@ -2,12 +2,11 @@ package postgres
 
 import (
 	"context"
-	"errors"
+	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"gitverse.ru/cataclysm78/video-surveillance/internal/domain"
@@ -41,10 +40,10 @@ func (r *RecordingRepository) Upsert(ctx context.Context, rec *domain.Recording)
 	return nil
 }
 
-// List возвращает сегменты архива с фильтрами по камере и времени.
+// List возвращает сегменты архива с фильтрами, новые первыми.
 func (r *RecordingRepository) List(ctx context.Context, cameraID *uuid.UUID, from, to *time.Time) ([]domain.Recording, error) {
 	query := `
-		SELECT id, camera_id, started_at, ended_at, storage_path, size_bytes, created_at
+		SELECT id, camera_id, started_at, ended_at, storage_path, size_bytes, kept, created_at
 		FROM recordings
 		WHERE ($1::uuid IS NULL OR camera_id = $1)
 		  AND ($2::timestamptz IS NULL OR started_at >= $2)
@@ -63,7 +62,7 @@ func (r *RecordingRepository) List(ctx context.Context, cameraID *uuid.UUID, fro
 		var rec domain.Recording
 		if err := rows.Scan(
 			&rec.ID, &rec.CameraID, &rec.StartedAt, &rec.EndedAt,
-			&rec.StoragePath, &rec.SizeBytes, &rec.CreatedAt,
+			&rec.StoragePath, &rec.SizeBytes, &rec.Kept, &rec.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan recording: %w", err)
 		}
@@ -78,26 +77,76 @@ func (r *RecordingRepository) List(ctx context.Context, cameraID *uuid.UUID, fro
 // GetByID возвращает сегмент по идентификатору. Если не найден — nil, nil.
 func (r *RecordingRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.Recording, error) {
 	query := `
-		SELECT id, camera_id, started_at, ended_at, storage_path, size_bytes, created_at
+		SELECT id, camera_id, started_at, ended_at, storage_path, size_bytes, kept, created_at
 		FROM recordings
 		WHERE id = $1
 	`
 	var rec domain.Recording
 	err := r.pool.QueryRow(ctx, query, id).Scan(
 		&rec.ID, &rec.CameraID, &rec.StartedAt, &rec.EndedAt,
-		&rec.StoragePath, &rec.SizeBytes, &rec.CreatedAt,
+		&rec.StoragePath, &rec.SizeBytes, &rec.Kept, &rec.CreatedAt,
 	)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, nil
-		}
 		return nil, fmt.Errorf("query recording: %w", err)
 	}
 	return &rec, nil
 }
 
-// Delete удаляет метаданные сегмента по идентификатору.
-func (r *RecordingRepository) Delete(ctx context.Context, id uuid.UUID) error {
+// MarkKept помечает сегменты, попавшие в окно эпизода движения, к постоянному хранению.
+func (r *RecordingRepository) MarkKept(ctx context.Context, cameraID uuid.UUID, from, to time.Time) (int64, error) {
+	query := `
+		UPDATE recordings
+		SET kept = true
+		WHERE camera_id = $1
+		  AND kept = false
+		  AND started_at <= $3
+		  AND (ended_at IS NULL OR ended_at >= $2)
+	`
+	tag, err := r.pool.Exec(ctx, query, cameraID, from, to)
+	if err != nil {
+		return 0, fmt.Errorf("mark recordings kept: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
+// ListExpiredBuffer возвращает сегменты буфера режима «по движению»,
+// не помеченные к хранению и закрытые раньше порога.
+func (r *RecordingRepository) ListExpiredBuffer(ctx context.Context, cameraID uuid.UUID, cutoff time.Time) ([]domain.Recording, error) {
+	query := `
+		SELECT id, camera_id, started_at, ended_at, storage_path, size_bytes, kept, created_at
+		FROM recordings
+		WHERE camera_id = $1
+		  AND kept = false
+		  AND ended_at IS NOT NULL
+		  AND ended_at < $2
+		ORDER BY started_at DESC
+		LIMIT 200
+	`
+	rows, err := r.pool.Query(ctx, query, cameraID, cutoff)
+	if err != nil {
+		return nil, fmt.Errorf("query expired buffer: %w", err)
+	}
+	defer rows.Close()
+
+	var recordings []domain.Recording
+	for rows.Next() {
+		var rec domain.Recording
+		if err := rows.Scan(
+			&rec.ID, &rec.CameraID, &rec.StartedAt, &rec.EndedAt,
+			&rec.StoragePath, &rec.SizeBytes, &rec.Kept, &rec.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan recording: %w", err)
+		}
+		recordings = append(recordings, rec)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate recordings: %w", err)
+	}
+	return recordings, nil
+}
+
+// DeleteByID удаляет метаданные сегмента по идентификатору.
+func (r *RecordingRepository) DeleteByID(ctx context.Context, id uuid.UUID) error {
 	_, err := r.pool.Exec(ctx, `DELETE FROM recordings WHERE id = $1`, id)
 	if err != nil {
 		return fmt.Errorf("delete recording: %w", err)
@@ -105,9 +154,12 @@ func (r *RecordingRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
+// Delete удаляет метаданные сегмента по идентификатору (алиас для совместимости).
+func (r *RecordingRepository) Delete(ctx context.Context, id uuid.UUID) error {
+	return r.DeleteByID(ctx, id)
+}
+
 // PruneMissing удаляет метаданные сегментов, файлы которых отсутствуют на диске.
-// prefix ограничивает область действия каталогу хранилища,
-// existing — список путей файлов, которые реально существуют.
 func (r *RecordingRepository) PruneMissing(ctx context.Context, existing []string, prefix string) (int64, error) {
 	query := `
 		DELETE FROM recordings
@@ -120,3 +172,6 @@ func (r *RecordingRepository) PruneMissing(ctx context.Context, existing []strin
 	}
 	return tag.RowsAffected(), nil
 }
+
+// ensureJSON используется для документирования зависимости от encoding/json.
+var _ = json.Marshal

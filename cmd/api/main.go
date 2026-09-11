@@ -19,6 +19,7 @@ import (
 	httpapi "gitverse.ru/cataclysm78/video-surveillance/internal/http"
 	"gitverse.ru/cataclysm78/video-surveillance/internal/mediamtx"
 	"gitverse.ru/cataclysm78/video-surveillance/internal/monitor"
+	"gitverse.ru/cataclysm78/video-surveillance/internal/motion"
 	"gitverse.ru/cataclysm78/video-surveillance/internal/postgres"
 	"gitverse.ru/cataclysm78/video-surveillance/internal/recorder"
 )
@@ -59,18 +60,17 @@ func main() {
 	media := mediamtx.NewClient(cfg.MediaMTXAPIURL)
 	tokens := auth.NewTokenService(cfg.JWTSecret, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
 
-	// Создаем первого администратора при пустой таблице users.
 	if err := seedAdmin(ctx, userRepo, cfg, logger); err != nil {
 		logger.Error("failed to seed admin user", "error", err)
 		os.Exit(1)
 	}
 
-	// Регистрируем в MediaMTX все активные камеры из базы данных.
 	syncMediaPaths(ctx, cameraRepo, media, logger)
 
-	// Фоновый сканер каталога сегментов записи.
+	// Фоновый сканер каталога сегментов записи и очистка буфера движения.
 	scanner := recorder.NewScanner(
 		recordingRepo,
+		cameraRepo,
 		filepath.Join(cfg.StoragePath, "recordings"),
 		30*time.Second,
 		logger,
@@ -81,13 +81,15 @@ func main() {
 	mon := monitor.NewMonitor(media, cameraRepo, eventRepo, 10*time.Second, logger)
 	mon.Start(ctx)
 
+	// Менеджер детекции движения по событиям ONVIF.
+	motionMgr := motion.NewManager(cameraRepo, eventRepo, recordingRepo, logger)
+	motionMgr.Start(ctx)
+
 	handler := httpapi.NewHandler(pool, cameraRepo, recordingRepo, eventRepo, userRepo, media, tokens, logger)
 
 	server := &http.Server{
-		Addr:    cfg.HTTPAddr,
-		Handler: handler,
-		// WriteTimeout увеличен до 30s: медленные ONVIF-операции
-		// ограничены внутренним дедлайном 20s и должны успевать ответить.
+		Addr:              cfg.HTTPAddr,
+		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      30 * time.Second,

@@ -2,7 +2,12 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { updateCamera } from '../api/client';
 import { useToast } from './Toast';
-import type { Camera, CameraSourceType, CameraStatus } from '../types/camera';
+import type {
+  Camera,
+  CameraSourceType,
+  CameraStatus,
+  RecordingMode,
+} from '../types/camera';
 import './CameraEditModal.css';
 
 interface CameraEditModalProps {
@@ -29,12 +34,17 @@ export default function CameraEditModal({ camera, onClose }: CameraEditModalProp
   const [onvifUsername, setOnvifUsername] = useState('');
   const [onvifPassword, setOnvifPassword] = useState('');
 
+  const [recordingMode, setRecordingMode] = useState<RecordingMode>('continuous');
+  const [motionDetection, setMotionDetection] = useState(false);
+
   useEffect(() => {
     if (!camera) return;
 
     setName(camera.name);
     setLocation(camera.location ?? '');
     setStatus(camera.status);
+    setRecordingMode(camera.recording_mode ?? 'continuous');
+    setMotionDetection(camera.motion_detection ?? false);
 
     const st = camera.source_type ?? 'rtsp';
     setSourceType(st);
@@ -60,6 +70,8 @@ export default function CameraEditModal({ camera, onClose }: CameraEditModalProp
         location: location.trim(),
         status,
         source_type: sourceType,
+        recording_mode: recordingMode,
+        motion_detection: motionDetection && sourceType === 'onvif',
       };
 
       if (sourceType === 'rtsp') {
@@ -70,7 +82,6 @@ export default function CameraEditModal({ camera, onClose }: CameraEditModalProp
           port: parseInt(onvifPort, 10) || 80,
           username: onvifUsername.trim(),
           password: onvifPassword,
-          // Профиль сохраняем текущий: бэкенд сам повторно получит RTSP-адрес.
           profile: camera.onvif?.profile,
         };
       }
@@ -205,6 +216,37 @@ export default function CameraEditModal({ camera, onClose }: CameraEditModalProp
               </p>
             </>
           )}
+
+          <label>
+            Режим записи
+            <select
+              value={recordingMode}
+              onChange={(e) => setRecordingMode(e.target.value as RecordingMode)}
+            >
+              <option value="continuous">Непрерывная</option>
+              <option value="motion">По движению</option>
+            </select>
+          </label>
+
+          <div className="switch-row">
+            <span className="switch-label">
+              <span className="switch-title">Детекция движения (ONVIF)</span>
+              <span className="switch-hint">
+                {sourceType === 'onvif'
+                  ? 'События движения и отбор эпизодов в архив'
+                  : 'Доступно только для ONVIF-камер'}
+              </span>
+            </span>
+            <label className="switch">
+              <input
+                type="checkbox"
+                checked={motionDetection}
+                disabled={sourceType !== 'onvif'}
+                onChange={(e) => setMotionDetection(e.target.checked)}
+              />
+              <span className="switch-slider" />
+            </label>
+          </div>
 
           <div className="modal-actions">
             <button type="submit" disabled={mutation.isPending}>

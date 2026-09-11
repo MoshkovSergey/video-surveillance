@@ -171,6 +171,7 @@ export default function ArchivePage() {
               <th>Начало</th>
               <th>Длительность</th>
               <th>Размер</th>
+              <th>Метка</th>
               <th>Действия</th>
             </tr>
           </thead>
@@ -181,6 +182,13 @@ export default function ArchivePage() {
                 <td>{formatDateTime(rec.started_at)}</td>
                 <td>{formatDuration(rec)}</td>
                 <td>{formatBytes(rec.size_bytes)}</td>
+                <td>
+                  {rec.kept ? (
+                    <span className="kept-badge">по движению</span>
+                  ) : (
+                    <span className="kept-empty">—</span>
+                  )}
+                </td>
                 <td>
                   <button
                     className="btn-small"

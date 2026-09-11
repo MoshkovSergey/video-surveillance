@@ -13,25 +13,29 @@ import (
 
 // CreateCameraRequest описывает тело запроса на создание камеры.
 type CreateCameraRequest struct {
-	Name       string                  `json:"name"`
-	RTSPUri    string                  `json:"rtsp_uri"`
-	Location   string                  `json:"location"`
-	FireZoneID *uuid.UUID              `json:"fire_zone_id"`
-	Config     map[string]any          `json:"config"`
-	SourceType domain.CameraSourceType `json:"source_type"`
-	ONVIF      *domain.ONVIFParams     `json:"onvif"`
+	Name            string                  `json:"name"`
+	RTSPUri         string                  `json:"rtsp_uri"`
+	Location        string                  `json:"location"`
+	FireZoneID      *uuid.UUID              `json:"fire_zone_id"`
+	Config          map[string]any          `json:"config"`
+	SourceType      domain.CameraSourceType `json:"source_type"`
+	ONVIF           *domain.ONVIFParams     `json:"onvif"`
+	RecordingMode   domain.RecordingMode    `json:"recording_mode"`
+	MotionDetection *bool                   `json:"motion_detection"`
 }
 
 // UpdateCameraRequest описывает тело запроса на обновление камеры.
 type UpdateCameraRequest struct {
-	Name       *string                  `json:"name"`
-	RTSPUri    *string                  `json:"rtsp_uri"`
-	Location   *string                  `json:"location"`
-	FireZoneID *uuid.UUID               `json:"fire_zone_id"`
-	Status     *domain.CameraStatus     `json:"status"`
-	Config     map[string]any           `json:"config"`
-	SourceType *domain.CameraSourceType `json:"source_type"`
-	ONVIF      *domain.ONVIFParams      `json:"onvif"`
+	Name            *string                  `json:"name"`
+	RTSPUri         *string                  `json:"rtsp_uri"`
+	Location        *string                  `json:"location"`
+	FireZoneID      *uuid.UUID               `json:"fire_zone_id"`
+	Status          *domain.CameraStatus     `json:"status"`
+	Config          map[string]any           `json:"config"`
+	SourceType      *domain.CameraSourceType `json:"source_type"`
+	ONVIF           *domain.ONVIFParams      `json:"onvif"`
+	RecordingMode   *domain.RecordingMode    `json:"recording_mode"`
+	MotionDetection *bool                    `json:"motion_detection"`
 }
 
 // handleCreateCamera создает новую камеру.
@@ -48,12 +52,17 @@ func (h *Handler) handleCreateCamera(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cam := &domain.Camera{
-		Name:       req.Name,
-		Location:   req.Location,
-		FireZoneID: req.FireZoneID,
-		Status:     domain.CameraStatusEnabled,
-		Config:     req.Config,
-		SourceType: sourceType,
+		Name:          req.Name,
+		Location:      req.Location,
+		FireZoneID:    req.FireZoneID,
+		Status:        domain.CameraStatusEnabled,
+		Config:        req.Config,
+		SourceType:    sourceType,
+		RecordingMode: req.RecordingMode,
+	}
+
+	if req.MotionDetection != nil {
+		cam.MotionDetection = *req.MotionDetection
 	}
 
 	switch sourceType {
@@ -98,7 +107,6 @@ func (h *Handler) handleCreateCamera(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Регистрируем путь в MediaMTX, чтобы видеосервер забирал поток с камеры.
 	pathName := "cam_" + cam.ID.String()
 	if err := h.media.AddPath(r.Context(), pathName, cam.RTSPUri); err != nil {
 		h.logger.Error("failed to register stream path in mediamtx",
@@ -206,7 +214,6 @@ func (h *Handler) handleUpdateCamera(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Применяем частичные обновления.
 	if req.Name != nil {
 		cam.Name = *req.Name
 	}
@@ -227,6 +234,12 @@ func (h *Handler) handleUpdateCamera(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.ONVIF != nil {
 		cam.ONVIF = req.ONVIF
+	}
+	if req.RecordingMode != nil {
+		cam.RecordingMode = *req.RecordingMode
+	}
+	if req.MotionDetection != nil {
+		cam.MotionDetection = *req.MotionDetection
 	}
 
 	switch cam.SourceType {
@@ -271,7 +284,6 @@ func (h *Handler) handleUpdateCamera(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Синхронизируем состояние потока в MediaMTX.
 	pathName := "cam_" + cam.ID.String()
 	if cam.Status == domain.CameraStatusEnabled {
 		if err := h.media.AddPath(r.Context(), pathName, cam.RTSPUri); err != nil {

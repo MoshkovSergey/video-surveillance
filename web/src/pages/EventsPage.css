@@ -27,3 +27,9 @@
   background: rgba(239, 68, 68, 0.14);
   box-shadow: 0 0 14px rgba(239, 68, 68, 0.35);
 }
+
+.event-details {
+  color: var(--muted);
+  font-size: 0.85rem;
+  white-space: nowrap;
+}

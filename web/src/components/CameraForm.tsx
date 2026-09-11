@@ -2,31 +2,36 @@ import { useState, type FormEvent } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { createCamera, probeOnvif } from '../api/client';
 import { useToast } from './Toast';
-import type { CameraSourceType, ONVIFParams, ONVIFProfile } from '../types/camera';
+import type {
+  CameraSourceType,
+  ONVIFParams,
+  ONVIFProfile,
+  RecordingMode,
+} from '../types/camera';
 import './CameraForm.css';
 
-// Форма создания камеры с поддержкой RTSP и ONVIF.
+// Форма создания камеры с поддержкой RTSP, ONVIF и режимов записи.
 export default function CameraForm() {
   const queryClient = useQueryClient();
   const notify = useToast();
 
   const [sourceType, setSourceType] = useState<CameraSourceType>('rtsp');
 
-  // RTSP поля
   const [name, setName] = useState('');
   const [rtspUri, setRtspUri] = useState('');
   const [location, setLocation] = useState('');
 
-  // ONVIF поля
   const [onvifHost, setOnvifHost] = useState('');
   const [onvifPort, setOnvifPort] = useState('80');
   const [onvifUsername, setOnvifUsername] = useState('admin');
   const [onvifPassword, setOnvifPassword] = useState('');
 
-  // Профили ONVIF
   const [profiles, setProfiles] = useState<ONVIFProfile[]>([]);
   const [selectedProfile, setSelectedProfile] = useState<ONVIFProfile | null>(null);
   const [probing, setProbing] = useState(false);
+
+  const [recordingMode, setRecordingMode] = useState<RecordingMode>('continuous');
+  const [motionDetection, setMotionDetection] = useState(false);
 
   const mutation = useMutation({
     mutationFn: () => {
@@ -34,6 +39,8 @@ export default function CameraForm() {
         name: name.trim(),
         location: location.trim(),
         source_type: sourceType,
+        recording_mode: recordingMode,
+        motion_detection: motionDetection && sourceType === 'onvif',
       };
 
       if (sourceType === 'rtsp') {
@@ -44,7 +51,7 @@ export default function CameraForm() {
         }
         payload.onvif = {
           host: onvifHost.trim(),
-          port: parseInt(onvifPort, 10),
+          port: parseInt(onvifPort, 10) || 80,
           username: onvifUsername.trim(),
           password: onvifPassword,
           profile: selectedProfile.token,
@@ -65,6 +72,8 @@ export default function CameraForm() {
       setOnvifPassword('');
       setProfiles([]);
       setSelectedProfile(null);
+      setRecordingMode('continuous');
+      setMotionDetection(false);
     },
     onError: (error: Error) => {
       notify('error', error.message);
@@ -229,6 +238,37 @@ export default function CameraForm() {
           )}
         </>
       )}
+
+      <label>
+        Режим записи
+        <select
+          value={recordingMode}
+          onChange={(e) => setRecordingMode(e.target.value as RecordingMode)}
+        >
+          <option value="continuous">Непрерывная</option>
+          <option value="motion">По движению</option>
+        </select>
+      </label>
+
+      <div className="switch-row">
+        <span className="switch-label">
+          <span className="switch-title">Детекция движения (ONVIF)</span>
+          <span className="switch-hint">
+            {sourceType === 'onvif'
+              ? 'События движения и отбор эпизодов в архив'
+              : 'Доступно только для ONVIF-камер'}
+          </span>
+        </span>
+        <label className="switch">
+          <input
+            type="checkbox"
+            checked={motionDetection}
+            disabled={sourceType !== 'onvif'}
+            onChange={(e) => setMotionDetection(e.target.checked)}
+          />
+          <span className="switch-slider" />
+        </label>
+      </div>
 
       <button type="submit" disabled={mutation.isPending}>
         {mutation.isPending ? 'Создание...' : 'Создать'}

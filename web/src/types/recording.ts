@@ -5,6 +5,7 @@ export interface Recording {
   ended_at?: string;
   storage_path: string;
   size_bytes: number;
+  kept: boolean;
   created_at: string;
 }
 

@@ -2,6 +2,8 @@ export type CameraStatus = 'enabled' | 'disabled' | 'error';
 
 export type CameraSourceType = 'rtsp' | 'onvif';
 
+export type RecordingMode = 'continuous' | 'motion';
+
 // ONVIFParams — параметры подключения к ONVIF-устройству.
 export interface ONVIFParams {
   host: string;
@@ -20,6 +22,8 @@ export interface Camera {
   status: CameraStatus;
   source_type: CameraSourceType;
   onvif?: ONVIFParams;
+  recording_mode: RecordingMode;
+  motion_detection: boolean;
   config?: Record<string, unknown>;
   created_at: string;
   updated_at: string;
@@ -39,6 +43,8 @@ export interface CreateCameraPayload {
   fire_zone_id?: string;
   source_type?: CameraSourceType;
   onvif?: ONVIFParams;
+  recording_mode?: RecordingMode;
+  motion_detection?: boolean;
   config?: Record<string, unknown>;
 }
 
@@ -50,6 +56,8 @@ export interface UpdateCameraPayload {
   status?: CameraStatus;
   source_type?: CameraSourceType;
   onvif?: ONVIFParams;
+  recording_mode?: RecordingMode;
+  motion_detection?: boolean;
   config?: Record<string, unknown>;
 }
 

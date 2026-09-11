@@ -1,13 +1,94 @@
-/* Основные стили архива вынесены в глобальную тему (index.css).
-   Здесь только локальные дополнения. */
-
-.btn-secondary {
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid var(--border);
-  box-shadow: none;
-  margin: 5px 20px;
+.archive-controls {
+  display: flex;
+  gap: 16px;
+  align-items: end;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
 }
 
-.btn-secondary:hover:not(:disabled) {
-  filter: brightness(1.15);
+.archive-controls label {
+  display: grid;
+  gap: 4px;
+  font-size: 0.9rem;
+  color: #444444;
+}
+
+.archive-controls select,
+.archive-controls input {
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 1rem;
+  outline: none;
+}
+
+.archive-controls select:focus,
+.archive-controls input:focus {
+  border-color: var(--border-accent);
+  box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.22);
+}
+
+.archive-player {
+  margin-bottom: 16px;
+  background: #000000;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  box-shadow: 0 0 30px rgba(124, 58, 237, 0.25);
+}
+
+.archive-player video {
+  width: 100%;
+  max-height: 60vh;
+  display: block;
+}
+
+.btn-small {
+  padding: 6px 10px;
+  border: none;
+  border-radius: 8px;
+  background: var(--grad);
+  color: #ffffff;
+  font-family: var(--font-body);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  margin-right: 8px;
+  transition: filter 0.2s;
+}
+
+.btn-small:hover:not(:disabled) {
+  filter: brightness(1.12);
+}
+
+.btn-small:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border);
+}
+
+/* ---------- Бейдж сегмента, сохранённого по движению ---------- */
+
+.kept-badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #67e8f9;
+  background: rgba(6, 182, 212, 0.15);
+  border: 1px solid rgba(6, 182, 212, 0.45);
+  box-shadow: 0 0 10px rgba(6, 182, 212, 0.35);
+  white-space: nowrap;
+}
+
+.kept-empty {
+  color: var(--muted);
 }

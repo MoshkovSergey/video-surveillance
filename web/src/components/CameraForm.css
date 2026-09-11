@@ -1,4 +1,4 @@
-/* ---------- Переключатель типа источника ---------- */
+/* ---------- Переключатель типа источника и режима записи ---------- */
 
 .source-switcher {
   display: flex;
@@ -30,6 +30,141 @@
   color: #ffffff;
   border-color: transparent;
   box-shadow: 0 0 16px rgba(124, 58, 237, 0.5);
+}
+
+/* ---------- Группа «Режим записи» ---------- */
+
+.form-group {
+  display: grid;
+  gap: 6px;
+}
+
+.form-group-label {
+  font-size: 0.8rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.form-hint {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+/* ---------- Нативный select в web3-теме ---------- */
+
+.camera-form select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  width: 100%;
+  padding: 10px 38px 10px 12px;
+  border-radius: 10px;
+  font-size: 1rem;
+  font-family: var(--font-body);
+  color: var(--text);
+  background-color: rgba(255, 255, 255, 0.05);
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 6l4 4 4-4' fill='none' stroke='%238b93a7' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 14px;
+  border: 1px solid var(--border);
+  outline: none;
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.camera-form select:hover {
+  border-color: var(--border-accent);
+}
+
+.camera-form select:focus {
+  border-color: var(--border-accent);
+  box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.22);
+}
+
+.camera-form select option {
+  background: #0b0d1c;
+  color: #e6e8f0;
+}
+
+/* ---------- Тумблер (вкл/выкл) ---------- */
+
+.toggle-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+
+.toggle-label:hover {
+  border-color: var(--border-accent);
+}
+
+.toggle-text {
+  display: grid;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.toggle-title {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.toggle-hint {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.toggle-switch {
+  flex: none;
+  width: 48px;
+  height: 26px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--border);
+  position: relative;
+  transition: background 0.2s, border-color 0.2s;
+  cursor: pointer;
+}
+
+.toggle-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #ffffff;
+  transition: left 0.2s, box-shadow 0.2s;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
+.toggle-on {
+  background: var(--grad);
+  border-color: transparent;
+  box-shadow: 0 0 14px rgba(124, 58, 237, 0.5);
+}
+
+.toggle-on .toggle-knob {
+  left: 24px;
+  box-shadow: 0 0 10px rgba(124, 58, 237, 0.8);
+}
+
+.toggle-disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 /* ---------- Кнопка опроса ONVIF ---------- */

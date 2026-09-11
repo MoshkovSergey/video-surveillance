@@ -25,15 +25,20 @@ func NewCameraRepository(pool *pgxpool.Pool) *CameraRepository {
 	return &CameraRepository{pool: pool}
 }
 
+const cameraColumns = `id, name, rtsp_uri, location, fire_zone_id, status, config,
+	created_at, updated_at, source_type, onvif_host, onvif_port, onvif_username,
+	onvif_password, onvif_profile, recording_mode, motion_detection`
+
 // Create сохраняет новую камеру в базе данных.
 func (r *CameraRepository) Create(ctx context.Context, cam *domain.Camera) error {
 	query := `
 		INSERT INTO cameras (
 			id, name, rtsp_uri, location, fire_zone_id, status, config,
 			created_at, updated_at,
-			source_type, onvif_host, onvif_port, onvif_username, onvif_password, onvif_profile
+			source_type, onvif_host, onvif_port, onvif_username, onvif_password, onvif_profile,
+			recording_mode, motion_detection
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
 	`
 
 	if cam.ID == uuid.Nil {
@@ -54,6 +59,7 @@ func (r *CameraRepository) Create(ctx context.Context, cam *domain.Camera) error
 		cam.ID, cam.Name, cam.RTSPUri, cam.Location, cam.FireZoneID,
 		cam.Status, configBytes, cam.CreatedAt, cam.UpdatedAt,
 		cam.SourceType, host, port, username, password, profile,
+		cam.RecordingMode, cam.MotionDetection,
 	)
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -67,12 +73,7 @@ func (r *CameraRepository) Create(ctx context.Context, cam *domain.Camera) error
 
 // List возвращает список всех камер.
 func (r *CameraRepository) List(ctx context.Context) ([]domain.Camera, error) {
-	query := `
-		SELECT id, name, rtsp_uri, location, fire_zone_id, status, config, created_at, updated_at,
-		       source_type, onvif_host, onvif_port, onvif_username, onvif_password, onvif_profile
-		FROM cameras
-		ORDER BY created_at DESC
-	`
+	query := `SELECT ` + cameraColumns + ` FROM cameras ORDER BY created_at DESC`
 	rows, err := r.pool.Query(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("query cameras: %w", err)
@@ -95,12 +96,7 @@ func (r *CameraRepository) List(ctx context.Context) ([]domain.Camera, error) {
 
 // GetByID возвращает камеру по идентификатору. Если не найдена — nil, nil.
 func (r *CameraRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.Camera, error) {
-	query := `
-		SELECT id, name, rtsp_uri, location, fire_zone_id, status, config, created_at, updated_at,
-		       source_type, onvif_host, onvif_port, onvif_username, onvif_password, onvif_profile
-		FROM cameras
-		WHERE id = $1
-	`
+	query := `SELECT ` + cameraColumns + ` FROM cameras WHERE id = $1`
 	row := r.pool.QueryRow(ctx, query, id)
 	cam, err := scanCamera(row)
 	if err != nil {
@@ -119,8 +115,9 @@ func (r *CameraRepository) Update(ctx context.Context, cam *domain.Camera) error
 		SET name = $1, rtsp_uri = $2, location = $3, fire_zone_id = $4, status = $5, config = $6,
 		    updated_at = $7,
 		    source_type = $8, onvif_host = $9, onvif_port = $10, onvif_username = $11,
-		    onvif_password = $12, onvif_profile = $13
-		WHERE id = $14
+		    onvif_password = $12, onvif_profile = $13,
+		    recording_mode = $14, motion_detection = $15
+		WHERE id = $16
 	`
 	cam.UpdatedAt = time.Now()
 
@@ -135,6 +132,7 @@ func (r *CameraRepository) Update(ctx context.Context, cam *domain.Camera) error
 		cam.Name, cam.RTSPUri, cam.Location, cam.FireZoneID,
 		cam.Status, configBytes, cam.UpdatedAt,
 		cam.SourceType, host, port, username, password, profile,
+		cam.RecordingMode, cam.MotionDetection,
 		cam.ID,
 	)
 	if err != nil {
@@ -189,6 +187,7 @@ func scanCamera(sc interface{ Scan(dest ...any) error }) (*domain.Camera, error)
 	var cam domain.Camera
 	var configBytes []byte
 	var sourceType string
+	var recordingMode string
 	var onvifHost *string
 	var onvifPort *int
 	var onvifUsername *string
@@ -199,6 +198,7 @@ func scanCamera(sc interface{ Scan(dest ...any) error }) (*domain.Camera, error)
 		&cam.ID, &cam.Name, &cam.RTSPUri, &cam.Location, &cam.FireZoneID,
 		&cam.Status, &configBytes, &cam.CreatedAt, &cam.UpdatedAt,
 		&sourceType, &onvifHost, &onvifPort, &onvifUsername, &onvifPassword, &onvifProfile,
+		&recordingMode, &cam.MotionDetection,
 	)
 	if err != nil {
 		return nil, err
@@ -213,6 +213,11 @@ func scanCamera(sc interface{ Scan(dest ...any) error }) (*domain.Camera, error)
 	cam.SourceType = domain.CameraSourceType(sourceType)
 	if cam.SourceType == "" {
 		cam.SourceType = domain.SourceRTSP
+	}
+
+	cam.RecordingMode = domain.RecordingMode(recordingMode)
+	if cam.RecordingMode == "" {
+		cam.RecordingMode = domain.RecordingContinuous
 	}
 
 	if onvifHost != nil {

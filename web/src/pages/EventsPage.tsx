@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getCameras, getEvents } from '../api/client';
-import type { EventType } from '../types/event';
+import type { EventType, SystemEvent } from '../types/event';
 import './EventsPage.css';
 
 const eventTypeLabels: Record<EventType, string> = {
@@ -19,6 +19,31 @@ const severityLabels: Record<string, string> = {
   warning: 'внимание',
   critical: 'критично',
 };
+
+// Формирует человекочитаемые детали события из payload.
+function eventDetails(ev: SystemEvent): string {
+  if (ev.type === 'motion') {
+    const parts: string[] = [];
+    const duration = ev.payload?.duration_sec;
+    if (typeof duration === 'number') {
+      parts.push(`${duration} с`);
+    }
+    const started = ev.payload?.started_at;
+    const ended = ev.payload?.ended_at;
+    if (typeof started === 'string' && typeof ended === 'string') {
+      parts.push(
+        `${new Date(started).toLocaleTimeString()} – ${new Date(ended).toLocaleTimeString()}`,
+      );
+    }
+    return parts.join(', ');
+  }
+
+  if (ev.type === 'camera_offline' || ev.type === 'camera_online') {
+    return ev.payload?.at_startup ? 'при старте сервиса' : '';
+  }
+
+  return '';
+}
 
 export default function EventsPage() {
   const [cameraId, setCameraId] = useState('');
@@ -89,6 +114,7 @@ export default function EventsPage() {
               <th>Время</th>
               <th>Камера</th>
               <th>Событие</th>
+              <th>Детали</th>
               <th>Важность</th>
             </tr>
           </thead>
@@ -98,6 +124,7 @@ export default function EventsPage() {
                 <td>{new Date(ev.occurred_at).toLocaleString()}</td>
                 <td>{cameraName(ev.camera_id)}</td>
                 <td>{eventTypeLabels[ev.type] ?? ev.type}</td>
+                <td className="event-details">{eventDetails(ev)}</td>
                 <td>
                   <span className={`severity-badge sev-${ev.severity}`}>
                     {severityLabels[ev.severity] ?? ev.severity}

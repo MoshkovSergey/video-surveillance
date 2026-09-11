@@ -17,6 +17,9 @@ import (
 	"gitverse.ru/cataclysm78/video-surveillance/internal/postgres"
 )
 
+// bufferRetention — время жизни буферных сегментов в режиме «по движению».
+const bufferRetention = 10 * time.Minute
+
 // errCameraMissing означает, что камера удалена из базы,
 // а её каталог с записями остался на диске.
 var errCameraMissing = errors.New("camera no longer exists in database")
@@ -24,23 +27,30 @@ var errCameraMissing = errors.New("camera no longer exists in database")
 // Scanner периодически сканирует каталог сегментов MediaMTX
 // и синхронизирует метаданные записей в PostgreSQL.
 type Scanner struct {
-	repo     *postgres.RecordingRepository
-	root     string
-	interval time.Duration
-	logger   *slog.Logger
+	repo       *postgres.RecordingRepository
+	cameraRepo *postgres.CameraRepository
+	root       string
+	interval   time.Duration
+	logger     *slog.Logger
 
-	// skipped — каталоги удалённых камер, о которых уже сообщили один раз.
 	skipped map[string]bool
 }
 
 // NewScanner создает сканер каталога записей.
-func NewScanner(repo *postgres.RecordingRepository, root string, interval time.Duration, logger *slog.Logger) *Scanner {
+func NewScanner(
+	repo *postgres.RecordingRepository,
+	cameraRepo *postgres.CameraRepository,
+	root string,
+	interval time.Duration,
+	logger *slog.Logger,
+) *Scanner {
 	return &Scanner{
-		repo:     repo,
-		root:     root,
-		interval: interval,
-		logger:   logger,
-		skipped:  make(map[string]bool),
+		repo:       repo,
+		cameraRepo: cameraRepo,
+		root:       root,
+		interval:   interval,
+		logger:     logger,
+		skipped:    make(map[string]bool),
 	}
 }
 
@@ -50,7 +60,6 @@ func (s *Scanner) Start(ctx context.Context) {
 		ticker := time.NewTicker(s.interval)
 		defer ticker.Stop()
 
-		// Первый скан сразу после старта.
 		s.scan(ctx)
 
 		for {
@@ -83,16 +92,14 @@ func (s *Scanner) scan(ctx context.Context) {
 
 		cameraID, err := uuid.Parse(strings.TrimPrefix(dir.Name(), "cam_"))
 		if err != nil {
-			continue // посторонний каталог
+			continue
 		}
 
 		paths, err := s.scanCamera(ctx, cameraID, filepath.Join(s.root, dir.Name()))
 		if err != nil {
 			if errors.Is(err, errCameraMissing) {
-				// Камера удалена оператором: каталог больше не синхронизируем.
 				if !s.skipped[dir.Name()] {
-					s.logger.Info(
-						"recordings directory belongs to a deleted camera; skipping it",
+					s.logger.Info("recordings directory belongs to a deleted camera; skipping it",
 						"dir", dir.Name(),
 					)
 					s.skipped[dir.Name()] = true
@@ -111,9 +118,9 @@ func (s *Scanner) scan(ctx context.Context) {
 		existing = append(existing, paths...)
 	}
 
-	// Удаляем метаданные сегментов, файлы которых отсутствуют на диске.
-	// Prune выполняется только при полностью успешном обходе каталога,
-	// чтобы временный сбой диска не уничтожил метаданные.
+	// Очистка буфера в режиме «по движению» не зависит от успеха prune.
+	s.cleanupMotionBuffers(ctx)
+
 	if scanFailed {
 		s.logger.Warn("skipping recordings prune due to scan errors")
 		return
@@ -126,6 +133,53 @@ func (s *Scanner) scan(ctx context.Context) {
 	}
 	if removed > 0 {
 		s.logger.Info("pruned recordings missing on disk", "count", removed)
+	}
+}
+
+// cleanupMotionBuffers удаляет буферные сегменты камер в режиме «по движению»,
+// которые не помечены к хранению и старше bufferRetention.
+func (s *Scanner) cleanupMotionBuffers(ctx context.Context) {
+	cams, err := s.cameraRepo.List(ctx)
+	if err != nil {
+		s.logger.Error("failed to list cameras for buffer cleanup", "error", err)
+		return
+	}
+
+	cutoff := time.Now().Add(-bufferRetention)
+
+	for _, cam := range cams {
+		if cam.RecordingMode != domain.RecordingMotion {
+			continue
+		}
+
+		rows, err := s.repo.ListExpiredBuffer(ctx, cam.ID, cutoff)
+		if err != nil {
+			s.logger.Error("failed to list expired buffer", "camera_id", cam.ID, "error", err)
+			continue
+		}
+
+		deleted := 0
+		for _, row := range rows {
+			if err := os.Remove(row.StoragePath); err != nil && !os.IsNotExist(err) {
+				s.logger.Error("failed to remove buffer file",
+					"path", row.StoragePath,
+					"error", err,
+				)
+				continue
+			}
+			if err := s.repo.DeleteByID(ctx, row.ID); err != nil {
+				s.logger.Error("failed to delete buffer row",
+					"recording_id", row.ID,
+					"error", err,
+				)
+				continue
+			}
+			deleted++
+		}
+
+		if deleted > 0 {
+			s.logger.Info("motion buffer cleanup", "camera_id", cam.ID, "deleted", deleted)
+		}
 	}
 }
 
@@ -149,7 +203,6 @@ func (s *Scanner) scanCamera(ctx context.Context, cameraID uuid.UUID, dir string
 			continue
 		}
 
-		// Имена файлов MediaMTX: 2006-01-02_15-04-05.mp4 (время UTC контейнера)
 		startedAt, err := time.Parse("2006-01-02_15-04-05", strings.TrimSuffix(e.Name(), ".mp4"))
 		if err != nil {
 			continue

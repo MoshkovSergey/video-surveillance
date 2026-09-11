@@ -14,5 +14,6 @@ type Recording struct {
 	EndedAt     *time.Time `json:"ended_at,omitempty"`
 	StoragePath string     `json:"storage_path"`
 	SizeBytes   int64      `json:"size_bytes"`
+	Kept        bool       `json:"kept"`
 	CreatedAt   time.Time  `json:"created_at"`
 }
