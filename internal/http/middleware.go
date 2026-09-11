@@ -13,33 +13,36 @@ type contextKey string
 
 const claimsKey contextKey = "claims"
 
-// isPublicPath перечисляет маршруты, доступные без аутентификации.
-func isPublicPath(path string) bool {
-	switch path {
-	case "/healthz", "/healthz/db", "/api/v1/auth/login", "/api/v1/auth/refresh":
-		return true
-	default:
-		return false
+func claimsFromContext(r *http.Request) *auth.Claims {
+	v := r.Context().Value(claimsKey)
+	if v == nil {
+		return nil
 	}
+	claims, ok := v.(*auth.Claims)
+	if !ok {
+		return nil
+	}
+	return claims
 }
 
-// authMiddleware проверяет Bearer-токен на всех защищенных маршрутах.
+// authMiddleware проверяет Bearer-токен во всех защищённых маршрутах.
 func (h *Handler) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if isPublicPath(r.URL.Path) {
-			next.ServeHTTP(w, r)
-			return
-		}
-
 		header := r.Header.Get("Authorization")
-		if !strings.HasPrefix(header, "Bearer ") {
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "missing bearer token"})
+		if header == "" {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "требуется аутентификация"})
 			return
 		}
 
-		claims, err := h.tokens.Parse(strings.TrimPrefix(header, "Bearer "), auth.TokenAccess)
+		parts := strings.SplitN(header, " ", 2)
+		if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "некорректный заголовок авторизации"})
+			return
+		}
+
+		claims, err := h.tokens.Parse(parts[1], auth.TokenAccess)
 		if err != nil {
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid or expired token"})
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "токен недействителен или просрочен"})
 			return
 		}
 
@@ -48,39 +51,27 @@ func (h *Handler) authMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// claimsFromContext извлекает claims текущего запроса.
-func claimsFromContext(r *http.Request) *auth.Claims {
-	claims, _ := r.Context().Value(claimsKey).(*auth.Claims)
-	return claims
-}
-
-// requireAuth требует любую аутентифицированную роль.
+// requireAuth оставляет маршрут доступным любому аутентифицированному пользователю.
 func (h *Handler) requireAuth(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if claimsFromContext(r) == nil {
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
-			return
-		}
-		next(w, r)
-	}
+	return next
 }
 
-// requireRoles требует одну из перечисленных ролей.
+// requireRoles ограничивает маршрут перечисленными ролями.
 func (h *Handler) requireRoles(next http.HandlerFunc, roles ...domain.UserRole) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		claims := claimsFromContext(r)
 		if claims == nil {
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "требуется аутентификация"})
 			return
 		}
 
 		for _, role := range roles {
 			if string(role) == claims.Role {
-				next(w, r)
+				next.ServeHTTP(w, r)
 				return
 			}
 		}
 
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permissions"})
-	}
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "недостаточно прав"})
+	})
 }

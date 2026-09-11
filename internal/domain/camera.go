@@ -32,8 +32,7 @@ type RecordingMode string
 const (
 	// RecordingContinuous — непрерывная запись всех сегментов.
 	RecordingContinuous RecordingMode = "continuous"
-	// RecordingMotion — в архив сохраняются только эпизоды движения,
-	// остальное хранится в коротком буфере и удаляется.
+	// RecordingMotion — в архив сохраняются только эпизоды движения.
 	RecordingMotion RecordingMode = "motion"
 )
 
@@ -72,35 +71,35 @@ func NormalizeRTSPUri(raw string) string {
 // Validate проверяет базовую корректность данных камеры.
 func (c *Camera) Validate() error {
 	if strings.TrimSpace(c.Name) == "" {
-		return fmt.Errorf("camera name is required")
+		return fmt.Errorf("укажите название камеры")
 	}
 	if strings.TrimSpace(c.RTSPUri) == "" {
-		return fmt.Errorf("camera rtsp uri is required")
+		return fmt.Errorf("укажите RTSP-адрес камеры")
 	}
 
 	u, err := url.Parse(c.RTSPUri)
 	if err != nil {
-		return fmt.Errorf("invalid rtsp uri: %w", err)
+		return fmt.Errorf("некорректный RTSP-адрес: %w", err)
 	}
 	if u.Scheme == "" || u.Host == "" {
-		return fmt.Errorf("invalid rtsp uri: scheme and host are required")
+		return fmt.Errorf("некорректный RTSP-адрес: нужны схема и хост")
 	}
 	if u.Fragment != "" {
-		return fmt.Errorf("invalid rtsp uri: unencoded '#' is not allowed")
+		return fmt.Errorf("некорректный RTSP-адрес: символ '#' должен быть закодирован")
 	}
 
 	if c.SourceType == "" {
 		c.SourceType = SourceRTSP
 	}
 	if c.SourceType != SourceRTSP && c.SourceType != SourceONVIF {
-		return fmt.Errorf("invalid source type: %s", c.SourceType)
+		return fmt.Errorf("некорректный тип источника: %s", c.SourceType)
 	}
 
 	if c.RecordingMode == "" {
 		c.RecordingMode = RecordingContinuous
 	}
 	if c.RecordingMode != RecordingContinuous && c.RecordingMode != RecordingMotion {
-		return fmt.Errorf("invalid recording mode: %s", c.RecordingMode)
+		return fmt.Errorf("некорректный режим записи: %s", c.RecordingMode)
 	}
 
 	switch c.Status {
@@ -109,7 +108,7 @@ func (c *Camera) Validate() error {
 	case "":
 		c.Status = CameraStatusEnabled
 	default:
-		return fmt.Errorf("invalid camera status: %s", c.Status)
+		return fmt.Errorf("некорректный статус камеры: %s", c.Status)
 	}
 	return nil
 }

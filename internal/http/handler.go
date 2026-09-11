@@ -149,7 +149,7 @@ func (h *Handler) recover(next http.Handler) http.Handler {
 
 				writeJSON(w, http.StatusInternalServerError, map[string]string{
 					"status":  "error",
-					"message": "internal server error",
+					"message": "внутренняя ошибка сервера",
 				})
 			}
 		}()

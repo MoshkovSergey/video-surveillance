@@ -42,7 +42,7 @@ type UpdateCameraRequest struct {
 func (h *Handler) handleCreateCamera(w http.ResponseWriter, r *http.Request) {
 	var req CreateCameraRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "некорректное тело запроса"})
 		return
 	}
 
@@ -68,7 +68,7 @@ func (h *Handler) handleCreateCamera(w http.ResponseWriter, r *http.Request) {
 	switch sourceType {
 	case domain.SourceONVIF:
 		if req.ONVIF == nil || req.ONVIF.Host == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "onvif host is required"})
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "для ONVIF-камеры укажите IP-адрес"})
 			return
 		}
 		port := req.ONVIF.Port
@@ -81,7 +81,7 @@ func (h *Handler) handleCreateCamera(w http.ResponseWriter, r *http.Request) {
 			onvif.Credentials{Username: req.ONVIF.Username, Password: req.ONVIF.Password},
 			req.ONVIF.Profile)
 		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "onvif: " + err.Error()})
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "ONVIF: " + err.Error()})
 			return
 		}
 
@@ -92,7 +92,7 @@ func (h *Handler) handleCreateCamera(w http.ResponseWriter, r *http.Request) {
 		cam.RTSPUri = domain.NormalizeRTSPUri(req.RTSPUri)
 
 	default:
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid source type"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "некорректный тип источника"})
 		return
 	}
 
@@ -103,7 +103,7 @@ func (h *Handler) handleCreateCamera(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.cameraRepo.Create(r.Context(), cam); err != nil {
 		h.logger.Error("failed to create camera", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "внутренняя ошибка сервера"})
 		return
 	}
 
@@ -123,7 +123,7 @@ func (h *Handler) handleListCameras(w http.ResponseWriter, r *http.Request) {
 	cameras, err := h.cameraRepo.List(r.Context())
 	if err != nil {
 		h.logger.Error("failed to list cameras", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "внутренняя ошибка сервера"})
 		return
 	}
 	if cameras == nil {
@@ -137,18 +137,18 @@ func (h *Handler) handleGetCamera(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid camera id"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "некорректный идентификатор камеры"})
 		return
 	}
 
 	cam, err := h.cameraRepo.GetByID(r.Context(), id)
 	if err != nil {
 		h.logger.Error("failed to get camera", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "внутренняя ошибка сервера"})
 		return
 	}
 	if cam == nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "camera not found"})
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "камера не найдена"})
 		return
 	}
 
@@ -160,18 +160,18 @@ func (h *Handler) handleGetCameraStream(w http.ResponseWriter, r *http.Request) 
 	idStr := r.PathValue("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid camera id"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "некорректный идентификатор камеры"})
 		return
 	}
 
 	cam, err := h.cameraRepo.GetByID(r.Context(), id)
 	if err != nil {
 		h.logger.Error("failed to get camera for stream", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "внутренняя ошибка сервера"})
 		return
 	}
 	if cam == nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "camera not found"})
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "камера не найдена"})
 		return
 	}
 
@@ -193,24 +193,24 @@ func (h *Handler) handleUpdateCamera(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid camera id"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "некорректный идентификатор камеры"})
 		return
 	}
 
 	cam, err := h.cameraRepo.GetByID(r.Context(), id)
 	if err != nil {
 		h.logger.Error("failed to get camera for update", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "внутренняя ошибка сервера"})
 		return
 	}
 	if cam == nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "camera not found"})
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "камера не найдена"})
 		return
 	}
 
 	var req UpdateCameraRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "некорректное тело запроса"})
 		return
 	}
 
@@ -245,7 +245,7 @@ func (h *Handler) handleUpdateCamera(w http.ResponseWriter, r *http.Request) {
 	switch cam.SourceType {
 	case domain.SourceONVIF:
 		if cam.ONVIF == nil || cam.ONVIF.Host == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "onvif host is required"})
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "для ONVIF-камеры укажите IP-адрес"})
 			return
 		}
 		port := cam.ONVIF.Port
@@ -258,7 +258,7 @@ func (h *Handler) handleUpdateCamera(w http.ResponseWriter, r *http.Request) {
 			onvif.Credentials{Username: cam.ONVIF.Username, Password: cam.ONVIF.Password},
 			cam.ONVIF.Profile)
 		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "onvif: " + err.Error()})
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "ONVIF: " + err.Error()})
 			return
 		}
 		cam.RTSPUri = domain.NormalizeRTSPUri(uri)
@@ -269,7 +269,7 @@ func (h *Handler) handleUpdateCamera(w http.ResponseWriter, r *http.Request) {
 		}
 
 	default:
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid source type"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "некорректный тип источника"})
 		return
 	}
 
@@ -280,7 +280,7 @@ func (h *Handler) handleUpdateCamera(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.cameraRepo.Update(r.Context(), cam); err != nil {
 		h.logger.Error("failed to update camera", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "внутренняя ошибка сервера"})
 		return
 	}
 
@@ -309,13 +309,13 @@ func (h *Handler) handleDeleteCamera(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid camera id"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "некорректный идентификатор камеры"})
 		return
 	}
 
 	if err := h.cameraRepo.Delete(r.Context(), id); err != nil {
 		h.logger.Error("failed to delete camera", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "внутренняя ошибка сервера"})
 		return
 	}
 

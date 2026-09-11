@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	// scanMaxTimeout — жёсткий предел длительности сканирования.
+	// scanMaxTimeout — жёсткий предел длительности сканирования сети.
 	scanMaxTimeout = 20 * time.Second
 	// scanQuietPeriod — период тишины, означающий, что сеть ответила.
 	scanQuietPeriod = 5 * time.Second
@@ -36,7 +36,7 @@ func (h *Handler) handleDiscoveryScan(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.logger.Error("discovery scan failed", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
-			"error": "scan failed: " + err.Error(),
+			"error": "ошибка сканирования: " + err.Error(),
 		})
 		return
 	}

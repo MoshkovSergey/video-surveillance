@@ -28,7 +28,7 @@ func (h *Handler) handleListUsers(w http.ResponseWriter, r *http.Request) {
 	users, err := h.userRepo.List(r.Context())
 	if err != nil {
 		h.logger.Error("failed to list users", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "внутренняя ошибка сервера"})
 		return
 	}
 
@@ -44,40 +44,40 @@ func (h *Handler) handleListUsers(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	var req createUserRequest
 	if err := decodeJSON(r, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "некорректное тело запроса"})
 		return
 	}
 
 	if len(req.Username) < 3 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "username must be at least 3 characters"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "имя пользователя должно содержать не менее 3 символов"})
 		return
 	}
 	if len(req.Password) < 8 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "password must be at least 8 characters"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "пароль должен содержать не менее 8 символов"})
 		return
 	}
 
 	role := domain.UserRole(req.Role)
 	if !role.Valid() {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid role"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "некорректная роль"})
 		return
 	}
 
 	existing, err := h.userRepo.GetByUsername(r.Context(), req.Username)
 	if err != nil {
 		h.logger.Error("failed to check existing user", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "внутренняя ошибка сервера"})
 		return
 	}
 	if existing != nil {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "username already exists"})
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "имя пользователя уже занято"})
 		return
 	}
 
 	hash, err := auth.HashPassword(req.Password)
 	if err != nil {
 		h.logger.Error("failed to hash password", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "внутренняя ошибка сервера"})
 		return
 	}
 
@@ -89,7 +89,7 @@ func (h *Handler) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := h.userRepo.Create(r.Context(), user); err != nil {
 		h.logger.Error("failed to create user", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "внутренняя ошибка сервера"})
 		return
 	}
 
@@ -100,42 +100,42 @@ func (h *Handler) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid user id"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "некорректный идентификатор пользователя"})
 		return
 	}
 
 	user, err := h.userRepo.GetByID(r.Context(), id)
 	if err != nil {
 		h.logger.Error("failed to get user for update", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "внутренняя ошибка сервера"})
 		return
 	}
 	if user == nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "user not found"})
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "пользователь не найден"})
 		return
 	}
 
 	var req updateUserRequest
 	if err := decodeJSON(r, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "некорректное тело запроса"})
 		return
 	}
 
 	if req.Username != nil {
 		name := strings.TrimSpace(*req.Username)
 		if len(name) < 3 {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "username must be at least 3 characters"})
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "имя пользователя должно содержать не менее 3 символов"})
 			return
 		}
 		if name != user.Username {
 			existing, err := h.userRepo.GetByUsername(r.Context(), name)
 			if err != nil {
 				h.logger.Error("failed to check existing user", "error", err)
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "внутренняя ошибка сервера"})
 				return
 			}
 			if existing != nil {
-				writeJSON(w, http.StatusConflict, map[string]string{"error": "username already exists"})
+				writeJSON(w, http.StatusConflict, map[string]string{"error": "имя пользователя уже занято"})
 				return
 			}
 			user.Username = name
@@ -144,13 +144,13 @@ func (h *Handler) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 
 	if req.Password != nil && strings.TrimSpace(*req.Password) != "" {
 		if len(*req.Password) < 8 {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "password must be at least 8 characters"})
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "пароль должен содержать не менее 8 символов"})
 			return
 		}
 		hash, err := auth.HashPassword(*req.Password)
 		if err != nil {
 			h.logger.Error("failed to hash password", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "внутренняя ошибка сервера"})
 			return
 		}
 		user.PasswordHash = hash
@@ -159,19 +159,19 @@ func (h *Handler) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 	if req.Role != nil {
 		newRole := domain.UserRole(*req.Role)
 		if !newRole.Valid() {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid role"})
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "некорректная роль"})
 			return
 		}
 		if newRole != user.Role && user.Role == domain.RoleAdmin {
 			count, err := h.userRepo.CountByRole(r.Context(), domain.RoleAdmin)
 			if err != nil {
 				h.logger.Error("failed to count admins", "error", err)
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "внутренняя ошибка сервера"})
 				return
 			}
 			if count <= 1 {
 				writeJSON(w, http.StatusBadRequest, map[string]string{
-					"error": "cannot remove admin role from the last administrator",
+					"error": "нельзя снять роль администратора с последнего администратора",
 				})
 				return
 			}
@@ -184,12 +184,12 @@ func (h *Handler) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 			count, err := h.userRepo.CountByRole(r.Context(), domain.RoleAdmin)
 			if err != nil {
 				h.logger.Error("failed to count admins", "error", err)
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "внутренняя ошибка сервера"})
 				return
 			}
 			if count <= 1 {
 				writeJSON(w, http.StatusBadRequest, map[string]string{
-					"error": "cannot disable the last administrator",
+					"error": "нельзя отключить последнего администратора",
 				})
 				return
 			}
@@ -199,7 +199,7 @@ func (h *Handler) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.userRepo.Update(r.Context(), user); err != nil {
 		h.logger.Error("failed to update user", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "внутренняя ошибка сервера"})
 		return
 	}
 
@@ -211,31 +211,31 @@ func (h *Handler) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid user id"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "некорректный идентификатор пользователя"})
 		return
 	}
 
 	user, err := h.userRepo.GetByID(r.Context(), id)
 	if err != nil {
 		h.logger.Error("failed to get user for delete", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "внутренняя ошибка сервера"})
 		return
 	}
 	if user == nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "user not found"})
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "пользователь не найден"})
 		return
 	}
 
 	if user.Role == domain.RoleAdmin {
 		writeJSON(w, http.StatusForbidden, map[string]string{
-			"error": "administrator cannot be deleted, only edited",
+			"error": "администратора нельзя удалить — только изменить",
 		})
 		return
 	}
 
 	if err := h.userRepo.Delete(r.Context(), id); err != nil {
 		h.logger.Error("failed to delete user", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "внутренняя ошибка сервера"})
 		return
 	}
 
