@@ -1,8 +1,9 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { deleteCamera, getCameras } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
+import CameraEditModal from '../components/CameraEditModal';
 import CameraForm from '../components/CameraForm';
 import { useToast } from '../components/Toast';
 import type { Camera, CameraStatus } from '../types/camera';
@@ -20,6 +21,8 @@ export default function CameraListPage() {
 
   const canManage = user?.role === 'admin' || user?.role === 'operator';
   const canDelete = user?.role === 'admin';
+
+  const [editingCamera, setEditingCamera] = useState<Camera | null>(null);
 
   const { data: cameras, isLoading, isError } = useQuery({
     queryKey: ['cameras'],
@@ -109,6 +112,14 @@ export default function CameraListPage() {
                 <Link to={`/cameras/${cam.id}/view`} className="btn-view">
                   Смотреть
                 </Link>
+                {canManage && (
+                  <button
+                    className="btn-edit"
+                    onClick={() => setEditingCamera(cam)}
+                  >
+                    Изменить
+                  </button>
+                )}
                 {canDelete && (
                   <button
                     className="btn-delete"
@@ -123,6 +134,11 @@ export default function CameraListPage() {
           ))}
         </tbody>
       </table>
+
+      <CameraEditModal
+        camera={editingCamera}
+        onClose={() => setEditingCamera(null)}
+      />
     </div>
   );
 }

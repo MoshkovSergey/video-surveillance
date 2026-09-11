@@ -16,3 +16,16 @@ export interface LoginPayload {
   username: string;
   password: string;
 }
+
+// Пользователь из административного API.
+export interface UserDTO {
+  id: string;
+  username: string;
+  role: UserRole;
+}
+
+export interface CreateUserPayload {
+  username: string;
+  password: string;
+  role: UserRole;
+}

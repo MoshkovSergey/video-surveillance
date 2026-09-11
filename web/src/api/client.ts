@@ -6,7 +6,13 @@ import type {
 } from '../types/camera';
 import type { Recording, RecordingsQuery } from '../types/recording';
 import type { EventsQuery, SystemEvent } from '../types/event';
-import type { AuthTokens, AuthUser, LoginPayload } from '../types/auth';
+import type {
+  AuthTokens,
+  AuthUser,
+  CreateUserPayload,
+  LoginPayload,
+  UserDTO,
+} from '../types/auth';
 
 const API_BASE = '/api/v1';
 
@@ -120,6 +126,28 @@ export async function login(payload: LoginPayload): Promise<AuthTokens> {
   const tokens = (await res.json()) as AuthTokens;
   storeTokens(tokens);
   return tokens;
+}
+
+// ---------- Users (admin only) ----------
+
+export async function getUsers(): Promise<UserDTO[]> {
+  const res = await apiFetch('/users');
+  if (!res.ok) {
+    throw new Error(await parseError(res));
+  }
+  return res.json();
+}
+
+export async function createUser(payload: CreateUserPayload): Promise<UserDTO> {
+  const res = await apiFetch('/users', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    throw new Error(await parseError(res));
+  }
+  return res.json();
 }
 
 // ---------- Cameras ----------

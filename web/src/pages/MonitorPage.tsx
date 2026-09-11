@@ -7,6 +7,9 @@ import './MonitorPage.css';
 
 const GRID_OPTIONS: readonly number[] = [6, 9, 12, 15, 18];
 
+// Мастер-раскладка всегда хранит 18 ячеек; видимая сетка — её срез.
+const MASTER_SIZE = 18;
+
 const GRID_COLS: Record<number, number> = {
   6: 3,
   9: 3,
@@ -47,22 +50,25 @@ function normalizeLayout(layout: (string | null)[], size: number): (string | nul
   return next;
 }
 
-const initialState = loadState();
-const initialSize =
-  initialState && GRID_OPTIONS.includes(initialState.gridSize)
-    ? initialState.gridSize
-    : 9;
-
 export default function MonitorPage() {
-  const [gridSize, setGridSize] = useState<number>(initialSize);
-  const [layout, setLayout] = useState<(string | null)[]>(() =>
-    normalizeLayout(initialState?.layout ?? [], initialSize),
-  );
+  // Состояние читается из localStorage при КАЖДОМ монтировании страницы,
+  // поэтому раскладка сохраняется при навигации между разделами
+  // и при перезагрузке браузера.
+  const [gridSize, setGridSize] = useState<number>(() => {
+    const saved = loadState();
+    return saved && GRID_OPTIONS.includes(saved.gridSize) ? saved.gridSize : 9;
+  });
+
+  const [layout, setLayout] = useState<(string | null)[]>(() => {
+    const saved = loadState();
+    return normalizeLayout(saved?.layout ?? [], MASTER_SIZE);
+  });
+
   const [selectedCell, setSelectedCell] = useState<number | null>(null);
   const [sortMode, setSortMode] = useState<SortMode>('name');
   const [filter, setFilter] = useState('');
 
-  // Раскладка монитора переживает перезагрузку страницы.
+  // Persist: раскладка и размер сетки переживают навигацию и перезагрузку.
   useEffect(() => {
     const state: MonitorState = { gridSize, layout };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -115,12 +121,14 @@ export default function MonitorPage() {
     return filtered;
   }, [cameras, sortMode, filter]);
 
+  // Видимый срез мастер-раскладки.
+  const view = useMemo(() => layout.slice(0, gridSize), [layout, gridSize]);
+
   const cols = GRID_COLS[gridSize] ?? 3;
   const rows = gridSize / cols;
 
   const changeGridSize = (size: number) => {
     setGridSize(size);
-    setLayout((prev) => normalizeLayout(prev, size));
     setSelectedCell(null);
   };
 
@@ -129,12 +137,12 @@ export default function MonitorPage() {
   };
 
   const clearAll = () => {
-    setLayout(Array<string | null>(gridSize).fill(null));
+    setLayout((prev) => prev.map((value, i) => (i < gridSize ? null : value)));
     setSelectedCell(null);
   };
 
   const autofill = () => {
-    setLayout(normalizeLayout(sortedCameras.map((c) => c.id), gridSize));
+    setLayout(normalizeLayout(sortedCameras.map((c) => c.id), MASTER_SIZE));
     setSelectedCell(null);
   };
 
@@ -143,19 +151,20 @@ export default function MonitorPage() {
       const next = [...prev];
       const existing = next.indexOf(cameraId);
 
+      const viewSlice = next.slice(0, gridSize);
       let target =
-        selectedCell !== null && selectedCell < next.length
+        selectedCell !== null && selectedCell < gridSize
           ? selectedCell
-          : next.indexOf(null);
+          : viewSlice.indexOf(null);
 
       if (target === -1) {
-        // Свободных ячеек нет: без выбранной ячейки ничего не меняем.
+        // Свободных ячеек в видимой сетке нет: без выбранной ячейки не меняем.
         if (selectedCell === null) return prev;
         target = selectedCell;
       }
 
       if (existing !== -1) {
-        // Камера уже на стене — меняем ячейки местами.
+        // Камера уже где-то на стене — меняем ячейки местами.
         next[existing] = next[target];
       }
 
@@ -208,7 +217,7 @@ export default function MonitorPage() {
           className="monitor-grid"
           style={{ '--cols': cols, '--rows': rows } as CSSProperties}
         >
-          {layout.map((camId, i) => {
+          {view.map((camId, i) => {
             const cam = camId ? cameraById.get(camId) : undefined;
 
             return (
@@ -262,7 +271,9 @@ export default function MonitorPage() {
 
         <div className="side-list">
           {sortedCameras.map((cam) => {
-            const cellIdx = layout.indexOf(cam.id);
+            const masterIdx = layout.indexOf(cam.id);
+            const cellIdx = masterIdx !== -1 && masterIdx < gridSize ? masterIdx : -1;
+
             return (
               <button
                 key={cam.id}

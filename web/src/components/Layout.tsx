@@ -34,6 +34,11 @@ export default function Layout() {
           <NavLink to="/events">
             События
           </NavLink>
+          {user?.role === 'admin' && (
+            <NavLink to="/users">
+              Пользователи
+            </NavLink>
+          )}
         </nav>
 
         <div className="app-header-right">
