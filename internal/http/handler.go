@@ -9,6 +9,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"gitverse.ru/cataclysm78/video-surveillance/internal/auth"
+	"gitverse.ru/cataclysm78/video-surveillance/internal/domain"
 	"gitverse.ru/cataclysm78/video-surveillance/internal/mediamtx"
 	"gitverse.ru/cataclysm78/video-surveillance/internal/postgres"
 )
@@ -19,7 +21,9 @@ type Handler struct {
 	cameraRepo    *postgres.CameraRepository
 	recordingRepo *postgres.RecordingRepository
 	eventRepo     *postgres.EventRepository
+	userRepo      *postgres.UserRepository
 	media         *mediamtx.Client
+	tokens        *auth.TokenService
 	logger        *slog.Logger
 }
 
@@ -29,7 +33,9 @@ func NewHandler(
 	cameraRepo *postgres.CameraRepository,
 	recordingRepo *postgres.RecordingRepository,
 	eventRepo *postgres.EventRepository,
+	userRepo *postgres.UserRepository,
 	media *mediamtx.Client,
+	tokens *auth.TokenService,
 	logger *slog.Logger,
 ) http.Handler {
 	h := &Handler{
@@ -37,32 +43,45 @@ func NewHandler(
 		cameraRepo:    cameraRepo,
 		recordingRepo: recordingRepo,
 		eventRepo:     eventRepo,
+		userRepo:      userRepo,
 		media:         media,
+		tokens:        tokens,
 		logger:        logger,
 	}
 
 	mux := http.NewServeMux()
 
-	// Health checks
+	// Health checks (public)
 	mux.HandleFunc("GET /healthz", h.handleHealthz)
 	mux.HandleFunc("GET /healthz/db", h.handleHealthzDB)
 
+	// Auth (public)
+	mux.HandleFunc("POST /api/v1/auth/login", h.handleLogin)
+	mux.HandleFunc("POST /api/v1/auth/refresh", h.handleRefresh)
+
+	// Auth (protected)
+	mux.HandleFunc("GET /api/v1/auth/me", h.requireAuth(h.handleMe))
+
 	// Cameras API
-	mux.HandleFunc("POST /api/v1/cameras", h.handleCreateCamera)
-	mux.HandleFunc("GET /api/v1/cameras", h.handleListCameras)
-	mux.HandleFunc("GET /api/v1/cameras/{id}", h.handleGetCamera)
-	mux.HandleFunc("GET /api/v1/cameras/{id}/stream", h.handleGetCameraStream)
-	mux.HandleFunc("PATCH /api/v1/cameras/{id}", h.handleUpdateCamera)
-	mux.HandleFunc("DELETE /api/v1/cameras/{id}", h.handleDeleteCamera)
+	mux.HandleFunc("POST /api/v1/cameras", h.requireRoles(h.handleCreateCamera, domain.RoleAdmin, domain.RoleOperator))
+	mux.HandleFunc("GET /api/v1/cameras", h.requireAuth(h.handleListCameras))
+	mux.HandleFunc("GET /api/v1/cameras/{id}", h.requireAuth(h.handleGetCamera))
+	mux.HandleFunc("GET /api/v1/cameras/{id}/stream", h.requireAuth(h.handleGetCameraStream))
+	mux.HandleFunc("PATCH /api/v1/cameras/{id}", h.requireRoles(h.handleUpdateCamera, domain.RoleAdmin, domain.RoleOperator))
+	mux.HandleFunc("DELETE /api/v1/cameras/{id}", h.requireRoles(h.handleDeleteCamera, domain.RoleAdmin))
 
 	// Recordings API
-	mux.HandleFunc("GET /api/v1/recordings", h.handleListRecordings)
-	mux.HandleFunc("GET /api/v1/recordings/{id}/file", h.handleGetRecordingFile)
+	mux.HandleFunc("GET /api/v1/recordings", h.requireAuth(h.handleListRecordings))
+	mux.HandleFunc("GET /api/v1/recordings/{id}/file", h.requireAuth(h.handleGetRecordingFile))
 
 	// Events API
-	mux.HandleFunc("GET /api/v1/events", h.handleListEvents)
+	mux.HandleFunc("GET /api/v1/events", h.requireAuth(h.handleListEvents))
 
-	return h.recover(h.logRequests(mux))
+	// Users API (admin only)
+	mux.HandleFunc("GET /api/v1/users", h.requireRoles(h.handleListUsers, domain.RoleAdmin))
+	mux.HandleFunc("POST /api/v1/users", h.requireRoles(h.handleCreateUser, domain.RoleAdmin))
+
+	return h.recover(h.logRequests(h.authMiddleware(mux)))
 }
 
 // handleHealthz возвращает базовый статус сервиса.
@@ -144,4 +163,11 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 		// Если ответ уже начал записываться, повторная запись статуса невозможна.
 		return
 	}
+}
+
+// decodeJSON декодирует тело запроса в структуру.
+func decodeJSON(r *http.Request, dst any) error {
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	return decoder.Decode(dst)
 }

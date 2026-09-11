@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -17,6 +18,12 @@ type Config struct {
 	MediaMTXAPIURL  string
 	StoragePath     string
 	ShutdownTimeout time.Duration
+
+	JWTSecret       string
+	AccessTokenTTL  time.Duration
+	RefreshTokenTTL time.Duration
+	AdminUsername   string
+	AdminPassword   string
 }
 
 // Load читает конфигурацию из переменных окружения.
@@ -29,6 +36,12 @@ func Load() (Config, error) {
 		MediaMTXAPIURL:  getEnv("MEDIAMTX_API_URL", "http://127.0.0.1:9999"),
 		StoragePath:     getEnv("STORAGE_PATH", "./storage"),
 		ShutdownTimeout: 10 * time.Second,
+
+		JWTSecret:       getEnv("JWT_SECRET", "dev-secret-change-me"),
+		AccessTokenTTL:  time.Duration(getEnvInt("ACCESS_TOKEN_TTL_MINUTES", 15)) * time.Minute,
+		RefreshTokenTTL: time.Duration(getEnvInt("REFRESH_TOKEN_TTL_HOURS", 24)) * time.Hour,
+		AdminUsername:   getEnv("ADMIN_USERNAME", "admin"),
+		AdminPassword:   getEnv("ADMIN_PASSWORD", "admin123"),
 	}
 
 	if strings.TrimSpace(cfg.DatabaseURL) == "" {
@@ -64,4 +77,17 @@ func getEnv(key, fallback string) string {
 	}
 
 	return fallback
+}
+
+func getEnvInt(key string, fallback int) int {
+	value := os.Getenv(key)
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+
+	n, err := strconv.Atoi(value)
+	if err != nil {
+		return fallback
+	}
+	return n
 }

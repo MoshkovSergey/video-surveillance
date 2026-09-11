@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { deleteCamera, getCameras } from '../api/client';
+import { useAuth } from '../auth/AuthContext';
 import CameraForm from '../components/CameraForm';
 import { useToast } from '../components/Toast';
 import type { Camera, CameraStatus } from '../types/camera';
@@ -28,6 +29,10 @@ const getStatusColor = (status: CameraStatus): string => {
 export default function CameraListPage() {
   const queryClient = useQueryClient();
   const notify = useToast();
+  const { user } = useAuth();
+
+  const canManage = user?.role === 'admin' || user?.role === 'operator';
+  const canDelete = user?.role === 'admin';
 
   const { data: cameras, isLoading, isError } = useQuery({
     queryKey: ['cameras'],
@@ -92,7 +97,7 @@ export default function CameraListPage() {
     <div className="container">
       <h1>Камеры видеонаблюдения</h1>
 
-      <CameraForm />
+      {canManage && <CameraForm />}
 
       <table className="camera-table">
         <thead>
@@ -120,13 +125,15 @@ export default function CameraListPage() {
                 <Link to={`/cameras/${cam.id}/view`} className="btn-view">
                   Смотреть
                 </Link>
-                <button
-                  className="btn-delete"
-                  disabled={deleteMutation.isPending}
-                  onClick={() => handleDelete(cam.id, cam.name)}
-                >
-                  Удалить
-                </button>
+                {canDelete && (
+                  <button
+                    className="btn-delete"
+                    disabled={deleteMutation.isPending}
+                    onClick={() => handleDelete(cam.id, cam.name)}
+                  >
+                    Удалить
+                  </button>
+                )}
               </td>
             </tr>
           ))}

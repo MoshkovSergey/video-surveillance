@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { getCameras, getRecordings, recordingFileUrl } from '../api/client';
+import { getCameras, getRecordingBlob, getRecordings } from '../api/client';
 import { useToast } from '../components/Toast';
 import type { Recording } from '../types/recording';
 import './ArchivePage.css';
@@ -38,6 +38,8 @@ export default function ArchivePage() {
   const [cameraId, setCameraId] = useState('');
   const [date, setDate] = useState(todayLocal);
   const [selected, setSelected] = useState<Recording | null>(null);
+  const [playerUrl, setPlayerUrl] = useState<string | null>(null);
+  const [loadingFile, setLoadingFile] = useState(false);
 
   const { data: cameras } = useQuery({
     queryKey: ['cameras'],
@@ -52,12 +54,7 @@ export default function ArchivePage() {
     };
   }, [date]);
 
-  const {
-    data: recordings,
-    isLoading,
-    isError,
-    refetch,
-  } = useQuery({
+  const { data: recordings, isLoading, isError } = useQuery({
     queryKey: ['recordings', cameraId, date],
     queryFn: () => getRecordings({ camera_id: cameraId || undefined, from, to }),
   });
@@ -65,10 +62,46 @@ export default function ArchivePage() {
   const cameraName = (id: string): string =>
     cameras?.find((c) => c.id === id)?.name ?? id;
 
+  const releasePlayerUrl = () => {
+    if (playerUrl) {
+      URL.revokeObjectURL(playerUrl);
+      setPlayerUrl(null);
+    }
+  };
+
+  const handleWatch = async (rec: Recording) => {
+    setLoadingFile(true);
+    try {
+      const blob = await getRecordingBlob(rec.id);
+      releasePlayerUrl();
+      setPlayerUrl(URL.createObjectURL(blob));
+      setSelected(rec);
+    } catch (error) {
+      notify('error', (error as Error).message);
+    } finally {
+      setLoadingFile(false);
+    }
+  };
+
+  const handleDownload = async (rec: Recording) => {
+    setLoadingFile(true);
+    try {
+      const blob = await getRecordingBlob(rec.id);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${rec.started_at.replace(/[:.]/g, '-')}.mp4`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      notify('error', (error as Error).message);
+    } finally {
+      setLoadingFile(false);
+    }
+  };
+
   const handlePlayerError = () => {
     notify('error', 'Файл записи отсутствует на диске');
-    // Список перезагрузится: сервер уже удалил устаревшую строку при обращении к файлу.
-    refetch();
   };
 
   return (
@@ -83,6 +116,7 @@ export default function ArchivePage() {
             onChange={(e) => {
               setCameraId(e.target.value);
               setSelected(null);
+              releasePlayerUrl();
             }}
           >
             <option value="">Все камеры</option>
@@ -102,12 +136,13 @@ export default function ArchivePage() {
             onChange={(e) => {
               setDate(e.target.value);
               setSelected(null);
+              releasePlayerUrl();
             }}
           />
         </label>
       </div>
 
-      {selected && (
+      {selected && playerUrl && (
         <div className="archive-player">
           <video
             key={selected.id}
@@ -115,7 +150,7 @@ export default function ArchivePage() {
             autoPlay
             muted
             playsInline
-            src={recordingFileUrl(selected.id)}
+            src={playerUrl}
             onError={handlePlayerError}
           />
         </div>
@@ -147,12 +182,20 @@ export default function ArchivePage() {
                 <td>{formatDuration(rec)}</td>
                 <td>{formatBytes(rec.size_bytes)}</td>
                 <td>
-                  <button className="btn-small" onClick={() => setSelected(rec)}>
+                  <button
+                    className="btn-small"
+                    disabled={loadingFile}
+                    onClick={() => handleWatch(rec)}
+                  >
                     Смотреть
                   </button>
-                  <a className="link-download" href={recordingFileUrl(rec.id)} download>
+                  <button
+                    className="btn-small btn-secondary"
+                    disabled={loadingFile}
+                    onClick={() => handleDownload(rec)}
+                  >
                     Скачать
-                  </a>
+                  </button>
                 </td>
               </tr>
             ))}

@@ -57,3 +57,11 @@
 .link-download:hover {
   text-decoration: underline;
 }
+
+.btn-secondary {
+  background: #6c757d;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: #5a6268;
+}
