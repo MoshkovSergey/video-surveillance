@@ -15,6 +15,7 @@ type Config struct {
 	LogLevel        string
 	DatabaseURL     string
 	MediaMTXAPIURL  string
+	StoragePath     string
 	ShutdownTimeout time.Duration
 }
 
@@ -25,7 +26,8 @@ func Load() (Config, error) {
 		HTTPAddr:        getEnv("HTTP_ADDR", ":8080"),
 		LogLevel:        getEnv("LOG_LEVEL", "info"),
 		DatabaseURL:     os.Getenv("DATABASE_URL"),
-		MediaMTXAPIURL:  getEnv("MEDIAMTX_API_URL", "http://localhost:9997"),
+		MediaMTXAPIURL:  getEnv("MEDIAMTX_API_URL", "http://127.0.0.1:9999"),
+		StoragePath:     getEnv("STORAGE_PATH", "./storage"),
 		ShutdownTimeout: 10 * time.Second,
 	}
 

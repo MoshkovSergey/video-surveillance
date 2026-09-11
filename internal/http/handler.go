@@ -15,19 +15,27 @@ import (
 
 // Handler содержит зависимости HTTP-сервера.
 type Handler struct {
-	pool       *pgxpool.Pool
-	cameraRepo *postgres.CameraRepository
-	media      *mediamtx.Client
-	logger     *slog.Logger
+	pool          *pgxpool.Pool
+	cameraRepo    *postgres.CameraRepository
+	recordingRepo *postgres.RecordingRepository
+	media         *mediamtx.Client
+	logger        *slog.Logger
 }
 
 // NewHandler создает HTTP-обработчик и регистрирует маршруты.
-func NewHandler(pool *pgxpool.Pool, cameraRepo *postgres.CameraRepository, media *mediamtx.Client, logger *slog.Logger) http.Handler {
+func NewHandler(
+	pool *pgxpool.Pool,
+	cameraRepo *postgres.CameraRepository,
+	recordingRepo *postgres.RecordingRepository,
+	media *mediamtx.Client,
+	logger *slog.Logger,
+) http.Handler {
 	h := &Handler{
-		pool:       pool,
-		cameraRepo: cameraRepo,
-		media:      media,
-		logger:     logger,
+		pool:          pool,
+		cameraRepo:    cameraRepo,
+		recordingRepo: recordingRepo,
+		media:         media,
+		logger:        logger,
 	}
 
 	mux := http.NewServeMux()
@@ -43,6 +51,10 @@ func NewHandler(pool *pgxpool.Pool, cameraRepo *postgres.CameraRepository, media
 	mux.HandleFunc("GET /api/v1/cameras/{id}/stream", h.handleGetCameraStream)
 	mux.HandleFunc("PATCH /api/v1/cameras/{id}", h.handleUpdateCamera)
 	mux.HandleFunc("DELETE /api/v1/cameras/{id}", h.handleDeleteCamera)
+
+	// Recordings API
+	mux.HandleFunc("GET /api/v1/recordings", h.handleListRecordings)
+	mux.HandleFunc("GET /api/v1/recordings/{id}/file", h.handleGetRecordingFile)
 
 	return h.recover(h.logRequests(mux))
 }

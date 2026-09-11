@@ -26,8 +26,10 @@ services:
     image: bluenviron/mediamtx:latest
     container_name: vs-mediamtx
     restart: unless-stopped
+
     volumes:
       - ./mediamtx.yml:/mediamtx.yml:ro
+      - ../../storage/recordings:/recordings
 
     ports:
       - "8554:8554"   # RTSP

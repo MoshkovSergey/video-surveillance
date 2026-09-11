@@ -25,9 +25,27 @@ func NewClient(baseURL string) *Client {
 }
 
 // pathConfig описывает конфигурацию пути MediaMTX.
+// record: true включает непрерывную запись сегментов MP4.
+// sourceOnDemand: false держит источник постоянно подключенным (поведение NVR).
 type pathConfig struct {
-	Source         string `json:"source"`
-	SourceOnDemand *bool  `json:"sourceOnDemand,omitempty"`
+	Source                string `json:"source"`
+	SourceOnDemand        *bool  `json:"sourceOnDemand,omitempty"`
+	Record                *bool  `json:"record,omitempty"`
+	RecordPath            string `json:"recordPath,omitempty"`
+	RecordSegmentDuration string `json:"recordSegmentDuration,omitempty"`
+}
+
+func newPathConfig(sourceRTSP string) pathConfig {
+	sourceOnDemand := false
+	record := true
+
+	return pathConfig{
+		Source:                sourceRTSP,
+		SourceOnDemand:        &sourceOnDemand,
+		Record:                &record,
+		RecordPath:            "/recordings/%path/%Y-%m-%d_%H-%M-%S",
+		RecordSegmentDuration: "60s",
+	}
 }
 
 // Ping проверяет доступность API MediaMTX.
@@ -42,15 +60,9 @@ func (c *Client) Ping(ctx context.Context) error {
 	return nil
 }
 
-// AddPath регистрирует путь с source-on-demand для камеры.
+// AddPath регистрирует путь камеры с непрерывной записью.
 func (c *Client) AddPath(ctx context.Context, name string, sourceRTSP string) error {
-	sourceOnDemand := true
-	cfg := pathConfig{
-		Source:         sourceRTSP,
-		SourceOnDemand: &sourceOnDemand,
-	}
-
-	payload, err := json.Marshal(cfg)
+	payload, err := json.Marshal(newPathConfig(sourceRTSP))
 	if err != nil {
 		return fmt.Errorf("marshal path config: %w", err)
 	}
@@ -74,13 +86,7 @@ func (c *Client) AddPath(ctx context.Context, name string, sourceRTSP string) er
 
 // EditPath обновляет конфигурацию существующего пути.
 func (c *Client) EditPath(ctx context.Context, name string, sourceRTSP string) error {
-	sourceOnDemand := true
-	cfg := pathConfig{
-		Source:         sourceRTSP,
-		SourceOnDemand: &sourceOnDemand,
-	}
-
-	payload, err := json.Marshal(cfg)
+	payload, err := json.Marshal(newPathConfig(sourceRTSP))
 	if err != nil {
 		return fmt.Errorf("marshal path config: %w", err)
 	}

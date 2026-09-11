@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -17,11 +18,11 @@ import (
 	httpapi "gitverse.ru/cataclysm78/video-surveillance/internal/http"
 	"gitverse.ru/cataclysm78/video-surveillance/internal/mediamtx"
 	"gitverse.ru/cataclysm78/video-surveillance/internal/postgres"
+	"gitverse.ru/cataclysm78/video-surveillance/internal/recorder"
 )
 
 func main() {
 	// Загружаем .env локально, если он есть.
-	// В контейнере переменные окружения обычно передаются без .env файла.
 	_ = godotenv.Load()
 
 	cfg, err := config.Load()
@@ -46,12 +47,22 @@ func main() {
 	logger.Info("database connection established")
 
 	cameraRepo := postgres.NewCameraRepository(pool)
+	recordingRepo := postgres.NewRecordingRepository(pool)
 	media := mediamtx.NewClient(cfg.MediaMTXAPIURL)
 
 	// Регистрируем в MediaMTX все активные камеры из базы данных.
 	syncMediaPaths(ctx, cameraRepo, media, logger)
 
-	handler := httpapi.NewHandler(pool, cameraRepo, media, logger)
+	// Фоновый сканер каталога сегментов записи.
+	scanner := recorder.NewScanner(
+		recordingRepo,
+		filepath.Join(cfg.StoragePath, "recordings"),
+		30*time.Second,
+		logger,
+	)
+	scanner.Start(ctx)
+
+	handler := httpapi.NewHandler(pool, cameraRepo, recordingRepo, media, logger)
 
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,
@@ -87,7 +98,6 @@ func main() {
 
 // syncMediaPaths регистрирует пути MediaMTX для всех активных камер из базы данных.
 func syncMediaPaths(ctx context.Context, repo *postgres.CameraRepository, media *mediamtx.Client, logger *slog.Logger) {
-	// Сначала убеждаемся, что на указанном порту отвечает именно MediaMTX.
 	if err := media.Ping(ctx); err != nil {
 		logger.Error("mediamtx api is not available; stream paths will not be registered", "error", err)
 		return
