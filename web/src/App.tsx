@@ -12,6 +12,7 @@ import ArchivePage from './pages/ArchivePage';
 import EventsPage from './pages/EventsPage';
 import UsersPage from './pages/UsersPage';
 import DiscoveryPage from './pages/DiscoveryPage';
+import SettingsPage from './pages/SettingsPage';
 
 const queryClient = new QueryClient();
 
@@ -33,6 +34,7 @@ function App() {
                   <Route path="/events" element={<EventsPage />} />
                   <Route path="/users" element={<UsersPage />} />
                   <Route path="/discovery" element={<DiscoveryPage />} />
+                  <Route path="/settings" element={<SettingsPage />} />
                 </Route>
               </Route>
             </Routes>

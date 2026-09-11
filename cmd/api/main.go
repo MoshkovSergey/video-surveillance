@@ -20,6 +20,7 @@ import (
 	"gitverse.ru/cataclysm78/video-surveillance/internal/mediamtx"
 	"gitverse.ru/cataclysm78/video-surveillance/internal/monitor"
 	"gitverse.ru/cataclysm78/video-surveillance/internal/motion"
+	"gitverse.ru/cataclysm78/video-surveillance/internal/notify"
 	"gitverse.ru/cataclysm78/video-surveillance/internal/postgres"
 	"gitverse.ru/cataclysm78/video-surveillance/internal/recorder"
 )
@@ -86,6 +87,11 @@ func main() {
 	// Менеджер детекции движения по событиям ONVIF.
 	motionMgr := motion.NewManager(cameraRepo, eventRepo, clipJobRepo, logger)
 	motionMgr.Start(ctx)
+
+	// Отправитель уведомлений в Telegram по событиям журнала.
+	settingsRepo := postgres.NewSettingsRepository(pool)
+	notifier := notify.NewNotifier(eventRepo, cameraRepo, settingsRepo, logger, 10*time.Second)
+	notifier.Start(ctx)
 
 	handler := httpapi.NewHandler(pool, cameraRepo, recordingRepo, eventRepo, userRepo, media, tokens, logger)
 

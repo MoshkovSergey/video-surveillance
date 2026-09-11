@@ -107,3 +107,40 @@ func (r *EventRepository) List(
 	}
 	return events, nil
 }
+
+// ListSince возвращает события с occurred_at >= since, старые первыми, с лимитом.
+func (r *EventRepository) ListSince(ctx context.Context, since time.Time, limit int) ([]domain.Event, error) {
+	query := `
+		SELECT id, camera_id, type, severity, payload, occurred_at
+		FROM events
+		WHERE occurred_at >= $1
+		ORDER BY occurred_at
+		LIMIT $2
+	`
+	rows, err := r.pool.Query(ctx, query, since, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query events since: %w", err)
+	}
+	defer rows.Close()
+
+	var events []domain.Event
+	for rows.Next() {
+		var ev domain.Event
+		var cameraID *uuid.UUID
+		var payloadBytes []byte
+		if err := rows.Scan(&ev.ID, &cameraID, &ev.Type, &ev.Severity, &payloadBytes, &ev.OccurredAt); err != nil {
+			return nil, fmt.Errorf("scan event: %w", err)
+		}
+		ev.CameraID = cameraID
+		if payloadBytes != nil {
+			if err := json.Unmarshal(payloadBytes, &ev.Payload); err != nil {
+				return nil, fmt.Errorf("unmarshal event payload: %w", err)
+			}
+		}
+		events = append(events, ev)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate events: %w", err)
+	}
+	return events, nil
+}

@@ -42,6 +42,9 @@ export default function Layout() {
               <NavLink to="/users">
                 Пользователи
               </NavLink>
+              <NavLink to="/settings">
+                Настройки
+              </NavLink>
             </>
           )}
         </nav>

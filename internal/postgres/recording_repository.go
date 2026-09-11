@@ -153,7 +153,7 @@ func (r *RecordingRepository) HasOpenOverlapping(ctx context.Context, cameraID u
 			WHERE camera_id = $1
 			  AND ended_at IS NULL
 			  AND started_at <= $3
-			  AND started_at >= $2 - interval '6 hours'
+			  AND started_at >= ($2::timestamptz - interval '6 hours')
 		)
 	`
 	var exists bool

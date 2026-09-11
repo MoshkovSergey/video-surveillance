@@ -89,6 +89,11 @@ func NewHandler(
 	mux.HandleFunc("PATCH /api/v1/users/{id}", h.requireRoles(h.handleUpdateUser, domain.RoleAdmin))
 	mux.HandleFunc("DELETE /api/v1/users/{id}", h.requireRoles(h.handleDeleteUser, domain.RoleAdmin))
 
+	// Settings API (admin only)
+	mux.HandleFunc("GET /api/v1/settings", h.requireRoles(h.handleGetSettings, domain.RoleAdmin))
+	mux.HandleFunc("PUT /api/v1/settings", h.requireRoles(h.handleUpdateSettings, domain.RoleAdmin))
+	mux.HandleFunc("POST /api/v1/settings/telegram/test", h.requireRoles(h.handleTelegramTest, domain.RoleAdmin))
+
 	return h.recover(h.logRequests(h.authMiddleware(mux)))
 }
 

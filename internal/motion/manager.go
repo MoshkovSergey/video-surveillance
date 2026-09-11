@@ -147,8 +147,6 @@ func (m *Manager) worker(ctx context.Context, cam domain.Camera) {
 			m.logger.Error("motion: failed to create event", "camera_id", cam.ID, "error", err)
 		}
 
-		// Ставим задачу вырезания точного клипа:
-		// 5 секунд предзаписи и 10 секунд постзаписи вокруг эпизода.
 		job := &domain.ClipJob{
 			ID:          uuid.New(),
 			CameraID:    cam.ID,
@@ -169,8 +167,16 @@ func (m *Manager) worker(ctx context.Context, cam domain.Camera) {
 		episodeStart = time.Time{}
 	}
 
+	subURL := ""
+
 	for ctx.Err() == nil {
-		subURL, err := onvif.Subscribe(ctx, cam.ONVIF.Host, port, creds)
+		// Корректно закрываем предыдущую подписку: камера держит лимит подписок.
+		if subURL != "" {
+			onvif.Unsubscribe(ctx, subURL, creds)
+			subURL = ""
+		}
+
+		newSub, err := onvif.Subscribe(ctx, cam.ONVIF.Host, port, creds)
 		if err != nil {
 			m.logger.Warn("motion: subscribe failed, retry later",
 				"camera_id", cam.ID,
@@ -183,7 +189,7 @@ func (m *Manager) worker(ctx context.Context, cam domain.Camera) {
 				continue
 			}
 		}
-
+		subURL = newSub
 		subscribedAt := time.Now()
 
 		for ctx.Err() == nil && time.Since(subscribedAt) < resubscribeAfter {
@@ -204,6 +210,10 @@ func (m *Manager) worker(ctx context.Context, cam domain.Camera) {
 				if msg.IsActive() {
 					if episodeStart.IsZero() {
 						episodeStart = now
+						m.logger.Info("motion episode started",
+							"camera_id", cam.ID,
+							"topic", msg.Topic,
+						)
 					}
 					lastActive = now
 				}
@@ -213,6 +223,11 @@ func (m *Manager) worker(ctx context.Context, cam domain.Camera) {
 				closeEpisode(lastActive.Add(episodeCooldown))
 			}
 		}
+	}
+
+	// При остановке воркера освобождаем подписку на камере.
+	if subURL != "" {
+		onvif.Unsubscribe(context.Background(), subURL, creds)
 	}
 
 	if !episodeStart.IsZero() {

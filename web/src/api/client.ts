@@ -16,7 +16,12 @@ import type {
   UpdateUserPayload,
   UserDTO,
 } from '../types/auth';
-import type { ScanResult } from '../types/discovery';
+import type { DiscoveredDevice, ScanResult } from '../types/discovery';
+import type {
+  SettingsDTO,
+  TelegramTestPayload,
+  UpdateSettingsPayload,
+} from '../types/settings';
 
 const API_BASE = '/api/v1';
 
@@ -168,6 +173,39 @@ export async function updateUser(id: string, payload: UpdateUserPayload): Promis
 export async function deleteUser(id: string): Promise<void> {
   const res = await apiFetch(`/users/${id}`, {
     method: 'DELETE',
+  });
+  if (!res.ok) {
+    throw new Error(await parseError(res));
+  }
+}
+
+// ---------- Settings (admin only) ----------
+
+export async function getSettings(): Promise<SettingsDTO> {
+  const res = await apiFetch('/settings');
+  if (!res.ok) {
+    throw new Error(await parseError(res));
+  }
+  return res.json();
+}
+
+export async function updateSettings(payload: UpdateSettingsPayload): Promise<SettingsDTO> {
+  const res = await apiFetch('/settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    throw new Error(await parseError(res));
+  }
+  return res.json();
+}
+
+export async function testTelegram(payload: TelegramTestPayload = {}): Promise<void> {
+  const res = await apiFetch('/settings/telegram/test', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    body: JSON.stringify(payload),
   });
   if (!res.ok) {
     throw new Error(await parseError(res));
