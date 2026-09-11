@@ -8,25 +8,30 @@ import (
 	"github.com/google/uuid"
 
 	"gitverse.ru/cataclysm78/video-surveillance/internal/domain"
+	"gitverse.ru/cataclysm78/video-surveillance/internal/onvif"
 )
 
 // CreateCameraRequest описывает тело запроса на создание камеры.
 type CreateCameraRequest struct {
-	Name       string         `json:"name"`
-	RTSPUri    string         `json:"rtsp_uri"`
-	Location   string         `json:"location"`
-	FireZoneID *uuid.UUID     `json:"fire_zone_id"`
-	Config     map[string]any `json:"config"`
+	Name       string                  `json:"name"`
+	RTSPUri    string                  `json:"rtsp_uri"`
+	Location   string                  `json:"location"`
+	FireZoneID *uuid.UUID              `json:"fire_zone_id"`
+	Config     map[string]any          `json:"config"`
+	SourceType domain.CameraSourceType `json:"source_type"`
+	ONVIF      *domain.ONVIFParams     `json:"onvif"`
 }
 
 // UpdateCameraRequest описывает тело запроса на обновление камеры.
 type UpdateCameraRequest struct {
-	Name       *string              `json:"name"`
-	RTSPUri    *string              `json:"rtsp_uri"`
-	Location   *string              `json:"location"`
-	FireZoneID *uuid.UUID           `json:"fire_zone_id"`
-	Status     *domain.CameraStatus `json:"status"`
-	Config     map[string]any       `json:"config"`
+	Name       *string                  `json:"name"`
+	RTSPUri    *string                  `json:"rtsp_uri"`
+	Location   *string                  `json:"location"`
+	FireZoneID *uuid.UUID               `json:"fire_zone_id"`
+	Status     *domain.CameraStatus     `json:"status"`
+	Config     map[string]any           `json:"config"`
+	SourceType *domain.CameraSourceType `json:"source_type"`
+	ONVIF      *domain.ONVIFParams      `json:"onvif"`
 }
 
 // handleCreateCamera создает новую камеру.
@@ -37,13 +42,49 @@ func (h *Handler) handleCreateCamera(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	sourceType := req.SourceType
+	if sourceType == "" {
+		sourceType = domain.SourceRTSP
+	}
+
 	cam := &domain.Camera{
 		Name:       req.Name,
-		RTSPUri:    domain.NormalizeRTSPUri(req.RTSPUri),
 		Location:   req.Location,
 		FireZoneID: req.FireZoneID,
 		Status:     domain.CameraStatusEnabled,
 		Config:     req.Config,
+		SourceType: sourceType,
+	}
+
+	switch sourceType {
+	case domain.SourceONVIF:
+		if req.ONVIF == nil || req.ONVIF.Host == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "onvif host is required"})
+			return
+		}
+		port := req.ONVIF.Port
+		if port == 0 {
+			port = 80
+		}
+		req.ONVIF.Port = port
+
+		uri, err := onvif.GetStreamUri(r.Context(), req.ONVIF.Host, port,
+			onvif.Credentials{Username: req.ONVIF.Username, Password: req.ONVIF.Password},
+			req.ONVIF.Profile)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "onvif: " + err.Error()})
+			return
+		}
+
+		cam.RTSPUri = domain.NormalizeRTSPUri(uri)
+		cam.ONVIF = req.ONVIF
+
+	case domain.SourceRTSP:
+		cam.RTSPUri = domain.NormalizeRTSPUri(req.RTSPUri)
+
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid source type"})
+		return
 	}
 
 	if err := cam.Validate(); err != nil {
@@ -78,7 +119,7 @@ func (h *Handler) handleListCameras(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if cameras == nil {
-		cameras = []domain.Camera{} // Возвращаем пустой массив, а не null
+		cameras = []domain.Camera{}
 	}
 	writeJSON(w, http.StatusOK, cameras)
 }
@@ -126,10 +167,7 @@ func (h *Handler) handleGetCameraStream(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// В продакшене хост и порты нужно брать из конфига.
 	host := "localhost"
-
-	// Префикс cam_ исключает коллизии имен путей в MediaMTX.
 	pathID := fmt.Sprintf("cam_%s", cam.ID.String())
 
 	streamInfo := map[string]string{
@@ -172,9 +210,6 @@ func (h *Handler) handleUpdateCamera(w http.ResponseWriter, r *http.Request) {
 	if req.Name != nil {
 		cam.Name = *req.Name
 	}
-	if req.RTSPUri != nil {
-		cam.RTSPUri = domain.NormalizeRTSPUri(*req.RTSPUri)
-	}
 	if req.Location != nil {
 		cam.Location = *req.Location
 	}
@@ -186,6 +221,43 @@ func (h *Handler) handleUpdateCamera(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Config != nil {
 		cam.Config = req.Config
+	}
+	if req.SourceType != nil {
+		cam.SourceType = *req.SourceType
+	}
+	if req.ONVIF != nil {
+		cam.ONVIF = req.ONVIF
+	}
+
+	switch cam.SourceType {
+	case domain.SourceONVIF:
+		if cam.ONVIF == nil || cam.ONVIF.Host == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "onvif host is required"})
+			return
+		}
+		port := cam.ONVIF.Port
+		if port == 0 {
+			port = 80
+			cam.ONVIF.Port = port
+		}
+
+		uri, err := onvif.GetStreamUri(r.Context(), cam.ONVIF.Host, port,
+			onvif.Credentials{Username: cam.ONVIF.Username, Password: cam.ONVIF.Password},
+			cam.ONVIF.Profile)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "onvif: " + err.Error()})
+			return
+		}
+		cam.RTSPUri = domain.NormalizeRTSPUri(uri)
+
+	case domain.SourceRTSP:
+		if req.RTSPUri != nil {
+			cam.RTSPUri = domain.NormalizeRTSPUri(*req.RTSPUri)
+		}
+
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid source type"})
+		return
 	}
 
 	if err := cam.Validate(); err != nil {
@@ -235,7 +307,6 @@ func (h *Handler) handleDeleteCamera(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Удаляем путь из MediaMTX.
 	if err := h.media.RemovePath(r.Context(), "cam_"+id.String()); err != nil {
 		h.logger.Error("failed to remove stream path from mediamtx",
 			"camera_id", id.String(),

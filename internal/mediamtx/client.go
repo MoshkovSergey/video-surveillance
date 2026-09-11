@@ -56,6 +56,17 @@ func newPathConfig(sourceRTSP string) pathConfig {
 	}
 }
 
+// removeVariants — кандидатные эндпоинты удаления пути в разных версиях MediaMTX.
+var removeVariants = []struct {
+	method string
+	path   string
+}{
+	{http.MethodPost, "/v3/config/paths/remove/"},
+	{http.MethodDelete, "/v3/config/paths/remove/"},
+	{http.MethodPost, "/v3/config/paths/delete/"},
+	{http.MethodDelete, "/v3/config/paths/delete/"},
+}
+
 // Ping проверяет доступность API MediaMTX.
 func (c *Client) Ping(ctx context.Context) error {
 	res, body, err := c.do(ctx, http.MethodGet, "/v3/config/global/get", nil)
@@ -85,9 +96,23 @@ func (c *Client) ListPaths(ctx context.Context) ([]PathInfo, error) {
 	return parsed.Items, nil
 }
 
+// pathConfigGet возвращает текущую конфигурацию пути; ok=false, если пути нет.
+func (c *Client) pathConfigGet(ctx context.Context, name string) (*pathConfig, bool) {
+	res, body, err := c.do(ctx, http.MethodGet, "/v3/config/paths/get/"+name, nil)
+	if err != nil || res.StatusCode != http.StatusOK {
+		return nil, false
+	}
+
+	var cfg pathConfig
+	if err := json.Unmarshal(body, &cfg); err != nil {
+		return nil, false
+	}
+	return &cfg, true
+}
+
 // AddPath регистрирует путь камеры с непрерывной записью.
-// Если путь уже существует, выполняется remove + add:
-// эндпоинт edit отсутствует в MediaMTX v1.21.
+// Если путь уже существует и его source совпадает — операция считается успешной.
+// Если source отличается — путь удаляется и создаётся заново.
 func (c *Client) AddPath(ctx context.Context, name string, sourceRTSP string) error {
 	payload, err := json.Marshal(newPathConfig(sourceRTSP))
 	if err != nil {
@@ -104,8 +129,13 @@ func (c *Client) AddPath(ctx context.Context, name string, sourceRTSP string) er
 	}
 
 	if res.StatusCode == http.StatusBadRequest || res.StatusCode == http.StatusConflict {
+		// Путь уже существует: проверяем, требуется ли обновление.
+		if cfg, ok := c.pathConfigGet(ctx, name); ok && cfg.Source == sourceRTSP {
+			return nil
+		}
+
 		if err := c.RemovePath(ctx, name); err != nil {
-			return fmt.Errorf("mediamtx remove path before re-add %s: %w", name, err)
+			return err
 		}
 
 		res, body, err = c.do(ctx, http.MethodPost, "/v3/config/paths/add/"+name, payload)
@@ -121,19 +151,31 @@ func (c *Client) AddPath(ctx context.Context, name string, sourceRTSP string) er
 	return fmt.Errorf("mediamtx add path %s: status %d, body: %s", name, res.StatusCode, string(body))
 }
 
-// RemovePath удаляет путь. Отсутствие пути не считается ошибкой.
+// RemovePath удаляет путь, перебирая эндпоинты разных версий MediaMTX.
+// Отсутствие пути не считается ошибкой.
 func (c *Client) RemovePath(ctx context.Context, name string) error {
-	res, body, err := c.do(ctx, http.MethodPost, "/v3/config/paths/remove/"+name, nil)
-	if err != nil {
-		return err
-	}
-	if res.StatusCode == http.StatusNotFound {
+	if _, ok := c.pathConfigGet(ctx, name); !ok {
 		return nil
 	}
-	if res.StatusCode != http.StatusOK && res.StatusCode != http.StatusNoContent {
-		return fmt.Errorf("mediamtx remove path %s: status %d, body: %s", name, res.StatusCode, string(body))
+
+	for _, variant := range removeVariants {
+		res, _, err := c.do(ctx, variant.method, variant.path+name, nil)
+		if err != nil {
+			continue
+		}
+		if res.StatusCode == http.StatusOK || res.StatusCode == http.StatusNoContent {
+			if _, still := c.pathConfigGet(ctx, name); !still {
+				return nil
+			}
+		}
 	}
-	return nil
+
+	// Контрольная проверка: возможно, удаление всё же состоялось.
+	if _, still := c.pathConfigGet(ctx, name); !still {
+		return nil
+	}
+
+	return fmt.Errorf("mediamtx remove path %s: no working remove endpoint in this MediaMTX version", name)
 }
 
 func (c *Client) do(ctx context.Context, method, path string, body []byte) (*http.Response, []byte, error) {

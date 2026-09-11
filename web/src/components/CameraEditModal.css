@@ -14,7 +14,9 @@
 
 .modal-card {
   width: 100%;
-  max-width: 480px;
+  max-width: 520px;
+  max-height: 90vh;
+  overflow-y: auto;
   background: var(--glass);
   border: 1px solid var(--border);
   border-radius: 20px;
@@ -25,7 +27,6 @@
     0 20px 60px rgba(3, 4, 12, 0.6),
     0 0 40px rgba(124, 58, 237, 0.18);
   position: relative;
-  overflow: hidden;
 }
 
 .modal-card::before {
@@ -86,10 +87,49 @@
   box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.22);
 }
 
+/* ---------- Справочное поле (только чтение) ---------- */
+
+.modal-readonly {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px dashed var(--border);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.modal-readonly-label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.modal-readonly-value {
+  font-size: 0.85rem;
+  color: var(--text);
+  word-break: break-all;
+}
+
+.modal-hint {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+/* ---------- Панель действий: всегда видна ---------- */
+
 .modal-actions {
+  position: sticky;
+  bottom: 0;
   display: flex;
   gap: 10px;
   margin-top: 6px;
+  padding: 14px 0 6px;
+  background: linear-gradient(180deg, rgba(11, 13, 28, 0), rgba(11, 13, 28, 0.92) 40%);
+  backdrop-filter: blur(6px);
 }
 
 .modal-actions button {
@@ -124,6 +164,40 @@
 .modal-actions button:disabled {
   opacity: 0.55;
   cursor: not-allowed;
+}
+
+/* ---------- Переключатель типа источника ---------- */
+
+.source-switcher {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.source-btn {
+  flex: 1;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--muted);
+  font-family: var(--font-body);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.source-btn:hover {
+  color: #ffffff;
+  border-color: var(--border-accent);
+}
+
+.source-btn.active {
+  background: var(--grad);
+  color: #ffffff;
+  border-color: transparent;
+  box-shadow: 0 0 16px rgba(124, 58, 237, 0.5);
 }
 
 /* ---------- Кнопка «Изменить» в таблице камер ---------- */

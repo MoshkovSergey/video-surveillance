@@ -18,23 +18,41 @@ const (
 	CameraStatusError    CameraStatus = "error"
 )
 
+// CameraSourceType определяет способ подключения камеры.
+type CameraSourceType string
+
+const (
+	SourceRTSP  CameraSourceType = "rtsp"
+	SourceONVIF CameraSourceType = "onvif"
+)
+
+// ONVIFParams — параметры подключения к ONVIF-устройству.
+type ONVIFParams struct {
+	Host     string `json:"host"`
+	Port     int    `json:"port,omitempty"`
+	Username string `json:"username,omitempty"`
+	Password string `json:"password,omitempty"`
+	Profile  string `json:"profile,omitempty"`
+}
+
 // Camera представляет камеру видеонаблюдения.
 type Camera struct {
-	ID         uuid.UUID      `json:"id"`
-	Name       string         `json:"name"`
-	RTSPUri    string         `json:"rtsp_uri"`
-	Location   string         `json:"location,omitempty"`
-	FireZoneID *uuid.UUID     `json:"fire_zone_id,omitempty"`
-	Status     CameraStatus   `json:"status"`
-	Config     map[string]any `json:"config"`
-	CreatedAt  time.Time      `json:"created_at"`
-	UpdatedAt  time.Time      `json:"updated_at"`
+	ID         uuid.UUID        `json:"id"`
+	Name       string           `json:"name"`
+	RTSPUri    string           `json:"rtsp_uri"`
+	Location   string           `json:"location,omitempty"`
+	FireZoneID *uuid.UUID       `json:"fire_zone_id,omitempty"`
+	Status     CameraStatus     `json:"status"`
+	SourceType CameraSourceType `json:"source_type"`
+	ONVIF      *ONVIFParams     `json:"onvif,omitempty"`
+	Config     map[string]any   `json:"config"`
+	CreatedAt  time.Time        `json:"created_at"`
+	UpdatedAt  time.Time        `json:"updated_at"`
 }
 
 // NormalizeRTSPUri percent-кодирует символы, которые не могут присутствовать
-// в RTSP-URL в сыром виде. Символ '#' начинает фрагмент URL, который
-// потоковые серверы (MediaMTX, FFmpeg) отвергают, поэтому он всегда
-// должен передаваться как %23.
+// в RTSP-URL в сыром виде. Символ '#' начинается фрагмент URL, который
+// потоковые серверы отвергают, поэтому он всегда передаётся как %23.
 func NormalizeRTSPUri(raw string) string {
 	return strings.ReplaceAll(strings.TrimSpace(raw), "#", "%23")
 }
@@ -57,6 +75,13 @@ func (c *Camera) Validate() error {
 	}
 	if u.Fragment != "" {
 		return fmt.Errorf("invalid rtsp uri: unencoded '#' is not allowed")
+	}
+
+	if c.SourceType == "" {
+		c.SourceType = SourceRTSP
+	}
+	if c.SourceType != SourceRTSP && c.SourceType != SourceONVIF {
+		return fmt.Errorf("invalid source type: %s", c.SourceType)
 	}
 
 	switch c.Status {

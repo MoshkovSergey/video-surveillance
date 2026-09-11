@@ -62,6 +62,9 @@ func NewHandler(
 	// Auth (protected)
 	mux.HandleFunc("GET /api/v1/auth/me", h.requireAuth(h.handleMe))
 
+	// ONVIF (admin/operator)
+	mux.HandleFunc("POST /api/v1/onvif/probe", h.requireRoles(h.handleOnvifProbe, domain.RoleAdmin, domain.RoleOperator))
+
 	// Cameras API
 	mux.HandleFunc("POST /api/v1/cameras", h.requireRoles(h.handleCreateCamera, domain.RoleAdmin, domain.RoleOperator))
 	mux.HandleFunc("GET /api/v1/cameras", h.requireAuth(h.handleListCameras))
@@ -160,7 +163,6 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 	}
 
 	if err := json.NewEncoder(w).Encode(body); err != nil {
-		// Если ответ уже начал записываться, повторная запись статуса невозможна.
 		return
 	}
 }

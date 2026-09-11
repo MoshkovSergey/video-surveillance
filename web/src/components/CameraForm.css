@@ -1,0 +1,118 @@
+/* ---------- Переключатель типа источника ---------- */
+
+.source-switcher {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.source-btn {
+  flex: 1;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--muted);
+  font-family: var(--font-body);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.source-btn:hover {
+  color: #ffffff;
+  border-color: var(--border-accent);
+}
+
+.source-btn.active {
+  background: var(--grad);
+  color: #ffffff;
+  border-color: transparent;
+  box-shadow: 0 0 16px rgba(124, 58, 237, 0.5);
+}
+
+/* ---------- Кнопка опроса ONVIF ---------- */
+
+.btn-probe {
+  padding: 12px 14px;
+  border: none;
+  border-radius: 10px;
+  background: var(--grad-hot);
+  color: #ffffff;
+  font-family: var(--font-body);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 4px 18px rgba(236, 72, 153, 0.35);
+  transition: filter 0.2s, transform 0.15s;
+}
+
+.btn-probe:hover:not(:disabled) {
+  filter: brightness(1.12);
+  transform: translateY(-1px);
+}
+
+.btn-probe:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* ---------- Список профилей ONVIF ---------- */
+
+.profiles-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.profiles-title {
+  margin: 0 0 6px;
+  font-size: 0.85rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.profile-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.profile-option:hover {
+  background: rgba(124, 58, 237, 0.12);
+  border-color: rgba(124, 58, 237, 0.4);
+}
+
+.profile-option input[type='radio'] {
+  margin-top: 2px;
+  accent-color: var(--violet);
+}
+
+.profile-info {
+  display: grid;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.profile-name {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.profile-uri {
+  font-size: 0.78rem;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

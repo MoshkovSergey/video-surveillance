@@ -2,6 +2,7 @@ package recorder
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -10,10 +11,15 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"gitverse.ru/cataclysm78/video-surveillance/internal/domain"
 	"gitverse.ru/cataclysm78/video-surveillance/internal/postgres"
 )
+
+// errCameraMissing означает, что камера удалена из базы,
+// а её каталог с записями остался на диске.
+var errCameraMissing = errors.New("camera no longer exists in database")
 
 // Scanner периодически сканирует каталог сегментов MediaMTX
 // и синхронизирует метаданные записей в PostgreSQL.
@@ -22,6 +28,9 @@ type Scanner struct {
 	root     string
 	interval time.Duration
 	logger   *slog.Logger
+
+	// skipped — каталоги удалённых камер, о которых уже сообщили один раз.
+	skipped map[string]bool
 }
 
 // NewScanner создает сканер каталога записей.
@@ -31,6 +40,7 @@ func NewScanner(repo *postgres.RecordingRepository, root string, interval time.D
 		root:     root,
 		interval: interval,
 		logger:   logger,
+		skipped:  make(map[string]bool),
 	}
 }
 
@@ -78,6 +88,18 @@ func (s *Scanner) scan(ctx context.Context) {
 
 		paths, err := s.scanCamera(ctx, cameraID, filepath.Join(s.root, dir.Name()))
 		if err != nil {
+			if errors.Is(err, errCameraMissing) {
+				// Камера удалена оператором: каталог больше не синхронизируем.
+				if !s.skipped[dir.Name()] {
+					s.logger.Info(
+						"recordings directory belongs to a deleted camera; skipping it",
+						"dir", dir.Name(),
+					)
+					s.skipped[dir.Name()] = true
+				}
+				continue
+			}
+
 			s.logger.Error("failed to scan camera recordings",
 				"camera_id", cameraID,
 				"error", err,
@@ -170,9 +192,22 @@ func (s *Scanner) scanCamera(ctx context.Context, cameraID uuid.UUID, dir string
 		}
 
 		if err := s.repo.Upsert(ctx, rec); err != nil {
+			if isForeignKeyViolation(err) {
+				return nil, errCameraMissing
+			}
 			return nil, err
 		}
 	}
 
 	return paths, nil
+}
+
+// isForeignKeyViolation распознаёт нарушение внешнего ключа:
+// штатный признак того, что камера удалена из базы.
+func isForeignKeyViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "23503"
+	}
+	return false
 }

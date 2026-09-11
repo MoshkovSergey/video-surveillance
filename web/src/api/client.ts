@@ -3,6 +3,8 @@ import type {
   CreateCameraPayload,
   StreamInfo,
   UpdateCameraPayload,
+  ONVIFParams,
+  ONVIFProfile,
 } from '../types/camera';
 import type { Recording, RecordingsQuery } from '../types/recording';
 import type { EventsQuery, SystemEvent } from '../types/event';
@@ -58,7 +60,6 @@ async function tryRefresh(): Promise<boolean> {
   const refresh = localStorage.getItem(REFRESH_KEY);
   if (!refresh) return false;
 
-  // Защита от параллельных обновлений из нескольких запросов.
   if (!refreshPromise) {
     refreshPromise = (async () => {
       try {
@@ -150,6 +151,21 @@ export async function createUser(payload: CreateUserPayload): Promise<UserDTO> {
   return res.json();
 }
 
+// ---------- ONVIF ----------
+
+// Опрос ONVIF-камеры: возвращает список профилей с RTSP-адресами.
+export async function probeOnvif(params: ONVIFParams): Promise<ONVIFProfile[]> {
+  const res = await apiFetch('/onvif/probe', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) {
+    throw new Error(await parseError(res));
+  }
+  return res.json();
+}
+
 // ---------- Cameras ----------
 
 export async function getCameras(): Promise<Camera[]> {
@@ -217,8 +233,6 @@ export async function getRecordings(params: RecordingsQuery = {}): Promise<Recor
   return res.json();
 }
 
-// Файлы архива загружаются через авторизованный fetch,
-// так как <video src> и <a href> не передают заголовок Authorization.
 export async function getRecordingBlob(recordingId: string): Promise<Blob> {
   const res = await apiFetch(`/recordings/${recordingId}/file`);
   if (!res.ok) {

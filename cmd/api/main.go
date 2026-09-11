@@ -59,7 +59,7 @@ func main() {
 	media := mediamtx.NewClient(cfg.MediaMTXAPIURL)
 	tokens := auth.NewTokenService(cfg.JWTSecret, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
 
-	// Создаем первого администратора, если пользователей еще нет.
+	// Создаем первого администратора при пустой таблице users.
 	if err := seedAdmin(ctx, userRepo, cfg, logger); err != nil {
 		logger.Error("failed to seed admin user", "error", err)
 		os.Exit(1)
@@ -84,11 +84,13 @@ func main() {
 	handler := httpapi.NewHandler(pool, cameraRepo, recordingRepo, eventRepo, userRepo, media, tokens, logger)
 
 	server := &http.Server{
-		Addr:              cfg.HTTPAddr,
-		Handler:           handler,
+		Addr:    cfg.HTTPAddr,
+		Handler: handler,
+		// WriteTimeout увеличен до 30s: медленные ONVIF-операции
+		// ограничены внутренним дедлайном 20s и должны успевать ответить.
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       15 * time.Second,
-		WriteTimeout:      15 * time.Second,
+		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
 
