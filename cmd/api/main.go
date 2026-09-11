@@ -14,6 +14,7 @@ import (
 	"github.com/joho/godotenv"
 
 	"gitverse.ru/cataclysm78/video-surveillance/internal/auth"
+	"gitverse.ru/cataclysm78/video-surveillance/internal/clipper"
 	"gitverse.ru/cataclysm78/video-surveillance/internal/config"
 	"gitverse.ru/cataclysm78/video-surveillance/internal/domain"
 	httpapi "gitverse.ru/cataclysm78/video-surveillance/internal/http"
@@ -85,12 +86,12 @@ func main() {
 	mon.Start(ctx)
 
 	// Менеджер детекции движения по событиям ONVIF.
-	motionMgr := motion.NewManager(cameraRepo, eventRepo, clipJobRepo, logger)
+	motionMgr := motion.NewManager(cameraRepo, eventRepo, clipJobRepo, clipper.New(cfg.StoragePath), logger)
 	motionMgr.Start(ctx)
 
 	// Отправитель уведомлений в Telegram по событиям журнала.
 	settingsRepo := postgres.NewSettingsRepository(pool)
-	notifier := notify.NewNotifier(eventRepo, cameraRepo, settingsRepo, logger, 10*time.Second)
+	notifier := notify.NewNotifier(eventRepo, cameraRepo, settingsRepo, logger, 10*time.Second, cfg.StoragePath)
 	notifier.Start(ctx)
 
 	handler := httpapi.NewHandler(pool, cameraRepo, recordingRepo, eventRepo, userRepo, media, tokens, logger)

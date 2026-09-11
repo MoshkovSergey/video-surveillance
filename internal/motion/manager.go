@@ -2,12 +2,14 @@ package motion
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 
+	"gitverse.ru/cataclysm78/video-surveillance/internal/clipper"
 	"gitverse.ru/cataclysm78/video-surveillance/internal/domain"
 	"gitverse.ru/cataclysm78/video-surveillance/internal/onvif"
 	"gitverse.ru/cataclysm78/video-surveillance/internal/postgres"
@@ -31,6 +33,7 @@ type Manager struct {
 	cameraRepo *postgres.CameraRepository
 	eventRepo  *postgres.EventRepository
 	jobRepo    *postgres.ClipJobRepository
+	clip       *clipper.Clipper
 	logger     *slog.Logger
 
 	mu      sync.Mutex
@@ -42,12 +45,14 @@ func NewManager(
 	cameraRepo *postgres.CameraRepository,
 	eventRepo *postgres.EventRepository,
 	jobRepo *postgres.ClipJobRepository,
+	clip *clipper.Clipper,
 	logger *slog.Logger,
 ) *Manager {
 	return &Manager{
 		cameraRepo: cameraRepo,
 		eventRepo:  eventRepo,
 		jobRepo:    jobRepo,
+		clip:       clip,
 		logger:     logger,
 		workers:    make(map[uuid.UUID]context.CancelFunc),
 	}
@@ -130,18 +135,61 @@ func (m *Manager) worker(ctx context.Context, cam domain.Camera) {
 
 	var episodeStart, lastActive time.Time
 
+	// snapMu защищает путь снимка текущего эпизода.
+	var snapMu sync.Mutex
+	snapRel := ""
+
+	// startSnapshot асинхронно захватывает кадр живого потока в момент триггера.
+	startSnapshot := func() {
+		rel := fmt.Sprintf("snapshots/cam_%s/%s.jpg",
+			cam.ID, time.Now().UTC().Format("2006-01-02_15-04-05"))
+		source := fmt.Sprintf("rtsp://127.0.0.1:8554/cam_%s", cam.ID)
+
+		go func() {
+			bg, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+
+			if err := m.clip.Snapshot(bg, source, rel); err != nil {
+				m.logger.Warn("motion: snapshot failed",
+					"camera_id", cam.ID,
+					"error", err,
+				)
+				return
+			}
+
+			snapMu.Lock()
+			snapRel = rel
+			snapMu.Unlock()
+
+			m.logger.Info("motion: snapshot captured",
+				"camera_id", cam.ID,
+				"path", rel,
+			)
+		}()
+	}
+
 	closeEpisode := func(end time.Time) {
+		snapMu.Lock()
+		snapshot := snapRel
+		snapRel = ""
+		snapMu.Unlock()
+
+		payload := map[string]any{
+			"started_at":   episodeStart.Format(time.RFC3339),
+			"ended_at":     end.Format(time.RFC3339),
+			"duration_sec": int(end.Sub(episodeStart).Seconds()),
+			"source":       "onvif",
+		}
+		if snapshot != "" {
+			payload["snapshot"] = snapshot
+		}
+
 		ev := &domain.Event{
 			CameraID:   &cam.ID,
 			Type:       domain.EventMotion,
 			Severity:   domain.SeverityInfo,
 			OccurredAt: end,
-			Payload: map[string]any{
-				"started_at":   episodeStart.Format(time.RFC3339),
-				"ended_at":     end.Format(time.RFC3339),
-				"duration_sec": int(end.Sub(episodeStart).Seconds()),
-				"source":       "onvif",
-			},
+			Payload:    payload,
 		}
 		if err := m.eventRepo.Create(ctx, ev); err != nil {
 			m.logger.Error("motion: failed to create event", "camera_id", cam.ID, "error", err)
@@ -162,7 +210,7 @@ func (m *Manager) worker(ctx context.Context, cam domain.Camera) {
 			"camera_id", cam.ID,
 			"started_at", episodeStart.Format(time.RFC3339),
 			"ended_at", end.Format(time.RFC3339),
-			"clip_window", job.WindowStart.Format(time.RFC3339)+".."+job.WindowEnd.Format(time.RFC3339),
+			"snapshot", snapshot,
 		)
 		episodeStart = time.Time{}
 	}
@@ -214,6 +262,7 @@ func (m *Manager) worker(ctx context.Context, cam domain.Camera) {
 							"camera_id", cam.ID,
 							"topic", msg.Topic,
 						)
+						startSnapshot()
 					}
 					lastActive = now
 				}

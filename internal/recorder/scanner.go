@@ -14,9 +14,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"gitverse.ru/cataclysm78/video-surveillance/internal/clipper"
 	"gitverse.ru/cataclysm78/video-surveillance/internal/domain"
 	"gitverse.ru/cataclysm78/video-surveillance/internal/postgres"
-	"gitverse.ru/cataclysm78/video-surveillance/internal/clipper"
 )
 
 // keepBufferSegments — сколько завершённых сегментов буфера режима
@@ -135,6 +135,9 @@ func (s *Scanner) scan(ctx context.Context) {
 
 	// Ротация буфера режима «по движению»: храним 3 последних сегмента.
 	s.cleanupMotionBuffers(ctx)
+
+	// Очистка старых снимков движения.
+	s.pruneSnapshots()
 
 	// Кадрирование точных фрагментов по эпизодам движения.
 	s.processClipJobs(ctx)
@@ -395,4 +398,41 @@ func isForeignKeyViolation(err error) bool {
 		return pgErr.Code == "23503"
 	}
 	return false
+}
+
+// pruneSnapshots удаляет снимки движения старше 7 суток.
+func (s *Scanner) pruneSnapshots() {
+	root := filepath.Join(filepath.Dir(s.root), "snapshots")
+	camDirs, err := os.ReadDir(root)
+	if err != nil {
+		return
+	}
+
+	cutoff := time.Now().Add(-7 * 24 * time.Hour)
+	deleted := 0
+
+	for _, dir := range camDirs {
+		if !dir.IsDir() {
+			continue
+		}
+		files, err := os.ReadDir(filepath.Join(root, dir.Name()))
+		if err != nil {
+			continue
+		}
+		for _, f := range files {
+			info, err := f.Info()
+			if err != nil || info.IsDir() {
+				continue
+			}
+			if info.ModTime().Before(cutoff) {
+				if err := os.Remove(filepath.Join(root, dir.Name(), f.Name())); err == nil {
+					deleted++
+				}
+			}
+		}
+	}
+
+	if deleted > 0 {
+		s.logger.Info("motion snapshots pruned", "deleted", deleted)
+	}
 }

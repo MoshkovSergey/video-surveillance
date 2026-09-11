@@ -5,8 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -41,11 +45,12 @@ var eventTitles = map[domain.EventType]struct{ emoji, title string }{
 
 // Notifier опрашивает журнал событий и отправляет уведомления в Telegram.
 type Notifier struct {
-	eventRepo  *postgres.EventRepository
-	cameraRepo *postgres.CameraRepository
-	settings   *postgres.SettingsRepository
-	logger     *slog.Logger
-	interval   time.Duration
+	eventRepo   *postgres.EventRepository
+	cameraRepo  *postgres.CameraRepository
+	settings    *postgres.SettingsRepository
+	logger      *slog.Logger
+	interval    time.Duration
+	storageRoot string
 
 	lastTs time.Time
 	seen   map[uuid.UUID]bool
@@ -58,15 +63,17 @@ func NewNotifier(
 	settings *postgres.SettingsRepository,
 	logger *slog.Logger,
 	interval time.Duration,
+	storageRoot string,
 ) *Notifier {
 	return &Notifier{
-		eventRepo:  eventRepo,
-		cameraRepo: cameraRepo,
-		settings:   settings,
-		logger:     logger,
-		interval:   interval,
-		lastTs:     time.Now(), // ретроспектива не рассылаются
-		seen:       make(map[uuid.UUID]bool),
+		eventRepo:   eventRepo,
+		cameraRepo:  cameraRepo,
+		settings:    settings,
+		logger:      logger,
+		interval:    interval,
+		storageRoot: storageRoot,
+		lastTs:      time.Now(), // ретроспектива не рассылается
+		seen:        make(map[uuid.UUID]bool),
 	}
 }
 
@@ -159,6 +166,23 @@ func (n *Notifier) process(ctx context.Context) {
 		}
 
 		text := n.message(ev, names)
+
+		// События движения отправляем со снимком кадра, если он есть.
+		if rel, ok := ev.Payload["snapshot"].(string); ok && rel != "" {
+			photo := filepath.Join(n.storageRoot, filepath.FromSlash(rel))
+			if _, err := os.Stat(photo); err == nil {
+				if err := SendTelegramPhoto(ctx, cfg.token, cfg.chat, photo, text); err != nil {
+					n.logger.Warn("notify: telegram photo send failed", "event_id", ev.ID, "error", err)
+					continue
+				}
+				n.logger.Info("notify: telegram photo notification sent",
+					"event_id", ev.ID,
+					"type", string(ev.Type),
+				)
+				continue
+			}
+		}
+
 		if err := SendTelegram(ctx, cfg.token, cfg.chat, text); err != nil {
 			n.logger.Warn("notify: telegram send failed", "event_id", ev.ID, "error", err)
 			continue
@@ -205,7 +229,7 @@ func escapeHTML(s string) string {
 	return r.Replace(s)
 }
 
-// SendTelegram отправляет сообщение через Bot API Telegram.
+// SendTelegram отправляет текстовое сообщение через Bot API Telegram.
 func SendTelegram(ctx context.Context, token, chat, text string) error {
 	ctx, cancel := context.WithTimeout(ctx, sendTimeout)
 	defer cancel()
@@ -227,6 +251,64 @@ func SendTelegram(ctx context.Context, token, chat, text string) error {
 		return fmt.Errorf("create telegram request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("telegram request: %w", err)
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusOK {
+		var tg struct {
+			Description string `json:"description"`
+		}
+		_ = json.NewDecoder(res.Body).Decode(&tg)
+		return fmt.Errorf("telegram api: статус %d: %s", res.StatusCode, tg.Description)
+	}
+	return nil
+}
+
+// SendTelegramPhoto отправляет сообщение с фотографией через Bot API Telegram.
+func SendTelegramPhoto(ctx context.Context, token, chat, photoPath, caption string) error {
+	ctx, cancel := context.WithTimeout(ctx, sendTimeout+10*time.Second)
+	defer cancel()
+
+	f, err := os.Open(photoPath)
+	if err != nil {
+		return fmt.Errorf("open photo: %w", err)
+	}
+	defer f.Close()
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+
+	if err := mw.WriteField("chat_id", chat); err != nil {
+		return fmt.Errorf("telegram multipart: %w", err)
+	}
+	if err := mw.WriteField("caption", caption); err != nil {
+		return fmt.Errorf("telegram multipart: %w", err)
+	}
+	if err := mw.WriteField("parse_mode", "HTML"); err != nil {
+		return fmt.Errorf("telegram multipart: %w", err)
+	}
+
+	part, err := mw.CreateFormFile("photo", filepath.Base(photoPath))
+	if err != nil {
+		return fmt.Errorf("telegram multipart: %w", err)
+	}
+	if _, err := io.Copy(part, f); err != nil {
+		return fmt.Errorf("telegram multipart copy: %w", err)
+	}
+	if err := mw.Close(); err != nil {
+		return fmt.Errorf("telegram multipart close: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://api.telegram.org/bot"+token+"/sendPhoto", &buf)
+	if err != nil {
+		return fmt.Errorf("create telegram request: %w", err)
+	}
+	req.Header.Set("Content-Type", mw.FormDataContentType())
 
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
