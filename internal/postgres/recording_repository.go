@@ -95,3 +95,28 @@ func (r *RecordingRepository) GetByID(ctx context.Context, id uuid.UUID) (*domai
 	}
 	return &rec, nil
 }
+
+// Delete удаляет метаданные сегмента по идентификатору.
+func (r *RecordingRepository) Delete(ctx context.Context, id uuid.UUID) error {
+	_, err := r.pool.Exec(ctx, `DELETE FROM recordings WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("delete recording: %w", err)
+	}
+	return nil
+}
+
+// PruneMissing удаляет метаданные сегментов, файлы которых отсутствуют на диске.
+// prefix ограничивает область действия каталогу хранилища,
+// existing — список путей файлов, которые реально существуют.
+func (r *RecordingRepository) PruneMissing(ctx context.Context, existing []string, prefix string) (int64, error) {
+	query := `
+		DELETE FROM recordings
+		WHERE storage_path LIKE $1
+		  AND NOT (storage_path = ANY($2))
+	`
+	tag, err := r.pool.Exec(ctx, query, prefix, existing)
+	if err != nil {
+		return 0, fmt.Errorf("prune recordings: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}

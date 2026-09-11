@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/google/uuid"
@@ -55,6 +56,7 @@ func (h *Handler) handleListRecordings(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleGetRecordingFile отдает файл сегмента для воспроизведения или скачивания.
+// Перед отдачей проверяет существование файла на диске.
 func (h *Handler) handleGetRecordingFile(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
@@ -70,6 +72,30 @@ func (h *Handler) handleGetRecordingFile(w http.ResponseWriter, r *http.Request)
 	}
 	if rec == nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "recording not found"})
+		return
+	}
+
+	// Проверка существования файла на диске.
+	if _, err := os.Stat(rec.StoragePath); err != nil {
+		if os.IsNotExist(err) {
+			// Метаданные устарели: файл удален с диска.
+			// Удаляем строку из базы, чтобы список архива стал консистентным.
+			if delErr := h.recordingRepo.Delete(r.Context(), rec.ID); delErr != nil {
+				h.logger.Error("failed to delete stale recording row",
+					"recording_id", rec.ID,
+					"error", delErr,
+				)
+			}
+
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "recording file not found on disk"})
+			return
+		}
+
+		h.logger.Error("failed to stat recording file",
+			"path", rec.StoragePath,
+			"error", err,
+		)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
 		return
 	}
 

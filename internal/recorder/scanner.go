@@ -63,6 +63,9 @@ func (s *Scanner) scan(ctx context.Context) {
 		return
 	}
 
+	existing := make([]string, 0, 64)
+	scanFailed := false
+
 	for _, dir := range cameraDirs {
 		if !dir.IsDir() {
 			continue
@@ -73,12 +76,34 @@ func (s *Scanner) scan(ctx context.Context) {
 			continue // посторонний каталог
 		}
 
-		if err := s.scanCamera(ctx, cameraID, filepath.Join(s.root, dir.Name())); err != nil {
+		paths, err := s.scanCamera(ctx, cameraID, filepath.Join(s.root, dir.Name()))
+		if err != nil {
 			s.logger.Error("failed to scan camera recordings",
 				"camera_id", cameraID,
 				"error", err,
 			)
+			scanFailed = true
+			continue
 		}
+
+		existing = append(existing, paths...)
+	}
+
+	// Удаляем метаданные сегментов, файлы которых отсутствуют на диске.
+	// Prune выполняется только при полностью успешном обходе каталога,
+	// чтобы временный сбой диска не уничтожил метаданные.
+	if scanFailed {
+		s.logger.Warn("skipping recordings prune due to scan errors")
+		return
+	}
+
+	removed, err := s.repo.PruneMissing(ctx, existing, filepath.ToSlash(s.root)+"/%")
+	if err != nil {
+		s.logger.Error("failed to prune missing recordings", "error", err)
+		return
+	}
+	if removed > 0 {
+		s.logger.Info("pruned recordings missing on disk", "count", removed)
 	}
 }
 
@@ -88,10 +113,12 @@ type segment struct {
 	size      int64
 }
 
-func (s *Scanner) scanCamera(ctx context.Context, cameraID uuid.UUID, dir string) error {
+// scanCamera синхронизирует сегменты одной камеры и возвращает
+// список путей файлов, которые реально существуют на диске.
+func (s *Scanner) scanCamera(ctx context.Context, cameraID uuid.UUID, dir string) ([]string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	segments := make([]segment, 0, len(entries))
@@ -122,6 +149,8 @@ func (s *Scanner) scanCamera(ctx context.Context, cameraID uuid.UUID, dir string
 		return segments[i].startedAt.Before(segments[j].startedAt)
 	})
 
+	paths := make([]string, 0, len(segments))
+
 	for i, seg := range segments {
 		var endedAt *time.Time
 		if i+1 < len(segments) {
@@ -129,18 +158,21 @@ func (s *Scanner) scanCamera(ctx context.Context, cameraID uuid.UUID, dir string
 			endedAt = &next
 		}
 
+		storagePath := filepath.ToSlash(seg.path)
+		paths = append(paths, storagePath)
+
 		rec := &domain.Recording{
 			CameraID:    cameraID,
 			StartedAt:   seg.startedAt,
 			EndedAt:     endedAt,
-			StoragePath: filepath.ToSlash(seg.path),
+			StoragePath: storagePath,
 			SizeBytes:   seg.size,
 		}
 
 		if err := s.repo.Upsert(ctx, rec); err != nil {
-			return err
+			return nil, err
 		}
 	}
 
-	return nil
+	return paths, nil
 }
