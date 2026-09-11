@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getCameras, getEvents } from '../api/client';
-import type { EventType, SystemEvent } from '../types/event';
+import MotionClipModal from '../components/MotionClipModal';
+import type { SystemEvent } from '../types/event';
+import type { EventType } from '../types/event';
 import './EventsPage.css';
 
 const eventTypeLabels: Record<EventType, string> = {
@@ -20,34 +22,53 @@ const severityLabels: Record<string, string> = {
   critical: 'критично',
 };
 
-// Формирует человекочитаемые детали события из payload.
-function eventDetails(ev: SystemEvent): string {
-  if (ev.type === 'motion') {
-    const parts: string[] = [];
-    const duration = ev.payload?.duration_sec;
-    if (typeof duration === 'number') {
-      parts.push(`${duration} с`);
-    }
-    const started = ev.payload?.started_at;
-    const ended = ev.payload?.ended_at;
-    if (typeof started === 'string' && typeof ended === 'string') {
-      parts.push(
-        `${new Date(started).toLocaleTimeString()} – ${new Date(ended).toLocaleTimeString()}`,
-      );
-    }
-    return parts.join(', ');
-  }
+function formatPayload(event: SystemEvent): string {
+  const p = event.payload;
+  if (!p || typeof p !== 'object') return '';
 
-  if (ev.type === 'camera_offline' || ev.type === 'camera_online') {
-    return ev.payload?.at_startup ? 'при старте сервиса' : '';
-  }
+  switch (event.type) {
+    case 'motion':
+      if (typeof p.duration_sec === 'number') {
+        return `Длительность: ${p.duration_sec} с`;
+      }
+      return 'Эпизод движения';
 
-  return '';
+    case 'camera_online':
+      return 'Связь восстановлена';
+
+    case 'camera_offline':
+      if (typeof p.reason === 'string') {
+        return `Причина: ${p.reason}`;
+      }
+      return 'Камера недоступна';
+
+    case 'fire_alarm':
+      return 'Сработала пожарная сигнализация';
+
+    case 'smoke_detection':
+      return 'Обнаружен дым';
+
+    case 'manual_alarm':
+      if (typeof p.note === 'string') {
+        return p.note;
+      }
+      return 'Ручная тревога';
+
+    case 'recording_error':
+      if (typeof p.error === 'string') {
+        return `Ошибка: ${p.error}`;
+      }
+      return 'Ошибка записи';
+
+    default:
+      return JSON.stringify(p).slice(0, 60);
+  }
 }
 
 export default function EventsPage() {
   const [cameraId, setCameraId] = useState('');
   const [type, setType] = useState('');
+  const [clipEvent, setClipEvent] = useState<SystemEvent | null>(null);
 
   const { data: cameras } = useQuery({
     queryKey: ['cameras'],
@@ -114,7 +135,7 @@ export default function EventsPage() {
               <th>Время</th>
               <th>Камера</th>
               <th>Событие</th>
-              <th>Детали</th>
+              <th>Примечание</th>
               <th>Важность</th>
             </tr>
           </thead>
@@ -123,18 +144,33 @@ export default function EventsPage() {
               <tr key={ev.id}>
                 <td>{new Date(ev.occurred_at).toLocaleString()}</td>
                 <td>{cameraName(ev.camera_id)}</td>
-                <td>{eventTypeLabels[ev.type] ?? ev.type}</td>
-                <td className="event-details">{eventDetails(ev)}</td>
+                <td>
+                  <span className={`event-type event-type-${ev.type}`}>
+                    {eventTypeLabels[ev.type] ?? ev.type}
+                  </span>
+                </td>
+                <td className="event-note">{formatPayload(ev)}</td>
                 <td>
                   <span className={`severity-badge sev-${ev.severity}`}>
                     {severityLabels[ev.severity] ?? ev.severity}
                   </span>
+                  {ev.type === 'motion' && (
+                    <button
+                      className="btn-small btn-clip"
+                      onClick={() => setClipEvent(ev)}
+                      title="Просмотреть фрагмент архива"
+                    >
+                      Просмотр
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       )}
+
+      <MotionClipModal event={clipEvent} onClose={() => setClipEvent(null)} />
     </div>
   );
 }

@@ -18,10 +18,10 @@ const (
 	reconcileInterval = 30 * time.Second
 	// episodeCooldown — пауза без движения, завершающая эпизод.
 	episodeCooldown = 10 * time.Second
-	// preRoll — предзапись: окно архива начинается за 5 с до триггера.
+	// preRoll — предзапись клипа: 5 секунд до триггера.
 	preRoll = 5 * time.Second
-	// postRoll — запас после окончания эпизода.
-	postRoll = 30 * time.Second
+	// postRoll — постзапись клипа: 10 секунд после окончания.
+	postRoll = 10 * time.Second
 	// resubscribeAfter — срок жизни PullPoint-подписки.
 	resubscribeAfter = 4 * time.Minute
 )
@@ -30,7 +30,7 @@ const (
 type Manager struct {
 	cameraRepo *postgres.CameraRepository
 	eventRepo  *postgres.EventRepository
-	recRepo    *postgres.RecordingRepository
+	jobRepo    *postgres.ClipJobRepository
 	logger     *slog.Logger
 
 	mu      sync.Mutex
@@ -41,13 +41,13 @@ type Manager struct {
 func NewManager(
 	cameraRepo *postgres.CameraRepository,
 	eventRepo *postgres.EventRepository,
-	recRepo *postgres.RecordingRepository,
+	jobRepo *postgres.ClipJobRepository,
 	logger *slog.Logger,
 ) *Manager {
 	return &Manager{
 		cameraRepo: cameraRepo,
 		eventRepo:  eventRepo,
-		recRepo:    recRepo,
+		jobRepo:    jobRepo,
 		logger:     logger,
 		workers:    make(map[uuid.UUID]context.CancelFunc),
 	}
@@ -147,18 +147,24 @@ func (m *Manager) worker(ctx context.Context, cam domain.Camera) {
 			m.logger.Error("motion: failed to create event", "camera_id", cam.ID, "error", err)
 		}
 
-		// Окно архива: 5 с предзаписи до триггера и postRoll после окончания.
-		// Помеченные сегменты хранятся постоянно и не удаляются буфером.
-		kept, err := m.recRepo.MarkKept(ctx, cam.ID, episodeStart.Add(-preRoll), end.Add(postRoll))
-		if err != nil {
-			m.logger.Error("motion: failed to mark recordings kept", "camera_id", cam.ID, "error", err)
+		// Ставим задачу вырезания точного клипа:
+		// 5 секунд предзаписи и 10 секунд постзаписи вокруг эпизода.
+		job := &domain.ClipJob{
+			ID:          uuid.New(),
+			CameraID:    cam.ID,
+			WindowStart: episodeStart.Add(-preRoll),
+			WindowEnd:   end.Add(postRoll),
+			Status:      "pending",
+		}
+		if err := m.jobRepo.Create(ctx, job); err != nil {
+			m.logger.Error("motion: failed to create clip job", "camera_id", cam.ID, "error", err)
 		}
 
 		m.logger.Info("motion episode closed",
 			"camera_id", cam.ID,
 			"started_at", episodeStart.Format(time.RFC3339),
 			"ended_at", end.Format(time.RFC3339),
-			"recordings_kept", kept,
+			"clip_window", job.WindowStart.Format(time.RFC3339)+".."+job.WindowEnd.Format(time.RFC3339),
 		)
 		episodeStart = time.Time{}
 	}

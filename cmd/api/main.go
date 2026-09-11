@@ -57,6 +57,7 @@ func main() {
 	recordingRepo := postgres.NewRecordingRepository(pool)
 	eventRepo := postgres.NewEventRepository(pool)
 	userRepo := postgres.NewUserRepository(pool)
+	clipJobRepo := postgres.NewClipJobRepository(pool)
 	media := mediamtx.NewClient(cfg.MediaMTXAPIURL)
 	tokens := auth.NewTokenService(cfg.JWTSecret, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
 
@@ -67,10 +68,11 @@ func main() {
 
 	syncMediaPaths(ctx, cameraRepo, media, logger)
 
-	// Фоновый сканер каталога сегментов записи и очистка буфера движения.
+	// Фоновый сканер: синхронизация сегментов, ротация буфера, кадрирование клипов.
 	scanner := recorder.NewScanner(
 		recordingRepo,
 		cameraRepo,
+		clipJobRepo,
 		filepath.Join(cfg.StoragePath, "recordings"),
 		30*time.Second,
 		logger,
@@ -82,7 +84,7 @@ func main() {
 	mon.Start(ctx)
 
 	// Менеджер детекции движения по событиям ONVIF.
-	motionMgr := motion.NewManager(cameraRepo, eventRepo, recordingRepo, logger)
+	motionMgr := motion.NewManager(cameraRepo, eventRepo, clipJobRepo, logger)
 	motionMgr.Start(ctx)
 
 	handler := httpapi.NewHandler(pool, cameraRepo, recordingRepo, eventRepo, userRepo, media, tokens, logger)

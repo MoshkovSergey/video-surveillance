@@ -33,3 +33,12 @@
   font-size: 0.85rem;
   white-space: nowrap;
 }
+
+.event-note {
+  color: var(--muted);
+  font-size: 0.85rem;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
