@@ -6,6 +6,7 @@ import Layout from './components/Layout';
 import { AuthProvider } from './auth/AuthContext';
 import LoginPage from './pages/LoginPage';
 import CameraListPage from './pages/CameraListPage';
+import MonitorPage from './pages/MonitorPage';
 import CameraViewPage from './pages/CameraViewPage';
 import ArchivePage from './pages/ArchivePage';
 import EventsPage from './pages/EventsPage';
@@ -24,6 +25,7 @@ function App() {
               <Route element={<RequireAuth />}>
                 <Route element={<Layout />}>
                   <Route path="/" element={<CameraListPage />} />
+                  <Route path="/monitor" element={<MonitorPage />} />
                   <Route path="/cameras/:id/view" element={<CameraViewPage />} />
                   <Route path="/archive" element={<ArchivePage />} />
                   <Route path="/events" element={<EventsPage />} />

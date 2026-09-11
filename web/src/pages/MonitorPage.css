@@ -1,0 +1,320 @@
+.monitor-page {
+  display: flex;
+  gap: 16px;
+  padding: 16px 20px 20px;
+  height: calc(100vh - 63px);
+  min-height: 560px;
+}
+
+.monitor-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ---------- Панель инструментов ---------- */
+
+.monitor-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  background: var(--glass);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  backdrop-filter: blur(14px);
+}
+
+.toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toolbar-label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+}
+
+.grid-btn {
+  min-width: 38px;
+  padding: 7px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--muted);
+  font-family: var(--font-body);
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.grid-btn:hover {
+  color: #ffffff;
+  border-color: var(--border-accent);
+}
+
+.grid-btn.active {
+  background: var(--grad);
+  color: #ffffff;
+  border-color: transparent;
+  box-shadow: 0 0 16px rgba(124, 58, 237, 0.5);
+}
+
+.monitor-toolbar select {
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--font-body);
+  outline: none;
+}
+
+/* ---------- Сетка монитора ---------- */
+
+.monitor-grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(var(--cols), 1fr);
+  grid-template-rows: repeat(var(--rows), 1fr);
+}
+
+.monitor-cell {
+  position: relative;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.monitor-cell:hover {
+  border-color: rgba(124, 58, 237, 0.4);
+}
+
+.monitor-cell.cell-selected {
+  border-color: var(--border-accent);
+  box-shadow:
+    0 0 0 2px rgba(124, 58, 237, 0.35),
+    0 0 24px rgba(124, 58, 237, 0.35);
+}
+
+.monitor-cell.cell-empty {
+  border-style: dashed;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.cell-placeholder {
+  font-family: var(--font-display);
+  font-size: 1.4rem;
+  color: rgba(255, 255, 255, 0.12);
+}
+
+.cell-header {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: linear-gradient(180deg, rgba(5, 6, 15, 0.85), transparent);
+}
+
+.cell-name {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #ffffff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cell-clear {
+  margin-left: auto;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.cell-clear:hover {
+  background: rgba(239, 68, 68, 0.35);
+  border-color: rgba(239, 68, 68, 0.6);
+}
+
+.cell-video {
+  flex: 1;
+  min-height: 0;
+  background: #000000;
+}
+
+.cell-video .video-frame {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  object-fit: contain;
+}
+
+.cell-loading {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.cell-error {
+  color: #fca5a5;
+}
+
+/* ---------- Индикаторы статуса ---------- */
+
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.status-dot.status-enabled {
+  background: var(--success);
+  box-shadow: 0 0 10px rgba(34, 197, 94, 0.8);
+}
+
+.status-dot.status-error {
+  background: var(--danger);
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.8);
+  animation: pulse-danger 1.6s infinite;
+}
+
+.status-dot.status-disabled {
+  background: #64748b;
+  box-shadow: 0 0 8px rgba(100, 116, 139, 0.6);
+}
+
+/* ---------- Правая панель устройств ---------- */
+
+.monitor-side {
+  width: 300px;
+  flex: none;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: var(--glass);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 16px;
+  backdrop-filter: blur(14px);
+}
+
+.monitor-side h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.side-filter {
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  color: var(--text);
+  outline: none;
+  font-family: var(--font-body);
+}
+
+.side-filter:focus {
+  border-color: var(--border-accent);
+  box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.22);
+}
+
+.side-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-right: 4px;
+}
+
+.side-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--font-body);
+  font-size: 0.9rem;
+  transition: all 0.15s;
+}
+
+.side-item:hover {
+  background: rgba(124, 58, 237, 0.16);
+  border-color: rgba(124, 58, 237, 0.4);
+}
+
+.side-item-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.side-item-cell {
+  flex: none;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(6, 182, 212, 0.18);
+  border: 1px solid rgba(6, 182, 212, 0.45);
+  color: #67e8f9;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.side-empty {
+  color: var(--muted);
+  font-size: 0.9rem;
+  padding: 12px;
+  text-align: center;
+}
+
+.side-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}

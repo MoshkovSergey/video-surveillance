@@ -25,8 +25,15 @@ export default function Layout() {
           <NavLink to="/" end>
             Камеры
           </NavLink>
-          <NavLink to="/archive">Архив</NavLink>
-          <NavLink to="/events">События</NavLink>
+          <NavLink to="/monitor">
+            Монитор
+          </NavLink>
+          <NavLink to="/archive">
+            Архив
+          </NavLink>
+          <NavLink to="/events">
+            События
+          </NavLink>
         </nav>
 
         <div className="app-header-right">
