@@ -25,9 +25,27 @@ func claimsFromContext(r *http.Request) *auth.Claims {
 	return claims
 }
 
-// authMiddleware проверяет Bearer-токен во всех защищённых маршрутах.
+// isPublicPath перечисляет маршруты, доступные без токена.
+func isPublicPath(path string) bool {
+	switch path {
+	case "/healthz",
+		"/healthz/db",
+		"/api/v1/auth/login",
+		"/api/v1/auth/refresh":
+		return true
+	}
+	return false
+}
+
+// authMiddleware проверяет Bearer-токен на всех защищённых маршрутах.
 func (h *Handler) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Публичные маршруты проходят без проверки токена.
+		if isPublicPath(r.URL.Path) {
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		header := r.Header.Get("Authorization")
 		if header == "" {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "требуется аутентификация"})
@@ -51,7 +69,7 @@ func (h *Handler) authMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// requireAuth оставляет маршрут доступным любому аутентифицированному пользователю.
+// requireAuth оставляет маршрут доступному любому аутентифицированному пользователю.
 func (h *Handler) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 	return next
 }
