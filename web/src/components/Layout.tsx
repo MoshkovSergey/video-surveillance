@@ -35,9 +35,14 @@ export default function Layout() {
             События
           </NavLink>
           {user?.role === 'admin' && (
-            <NavLink to="/users">
-              Пользователи
-            </NavLink>
+            <>
+              <NavLink to="/discovery">
+                Поиск камер
+              </NavLink>
+              <NavLink to="/users">
+                Пользователи
+              </NavLink>
+            </>
           )}
         </nav>
 

@@ -5,8 +5,9 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import './Toast.css';
 
-type ToastKind = 'success' | 'error';
+export type ToastKind = 'success' | 'error' | 'info';
 
 interface ToastItem {
   id: number;
@@ -14,28 +15,35 @@ interface ToastItem {
   message: string;
 }
 
-type NotifyFn = (kind: ToastKind, message: string) => void;
-
-const ToastContext = createContext<NotifyFn>(() => {});
-
-export function useToast(): NotifyFn {
-  return useContext(ToastContext);
+interface ToastContextValue {
+  notify: (kind: ToastKind, message: string) => void;
 }
+
+const ToastContext = createContext<ToastContextValue>({
+  notify: () => {},
+});
+
+let nextId = 1;
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
 
-  const notify = useCallback<NotifyFn>((kind, message) => {
-    const id = Date.now() + Math.random();
-    setToasts((prev) => [...prev, { id, kind, message }]);
-
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 4000);
+  const remove = useCallback((id: number) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
+  const notify = useCallback(
+    (kind: ToastKind, message: string) => {
+      const id = nextId++;
+      setToasts((prev) => [...prev, { id, kind, message }]);
+
+      window.setTimeout(() => remove(id), 4000);
+    },
+    [remove],
+  );
+
   return (
-    <ToastContext.Provider value={notify}>
+    <ToastContext.Provider value={{ notify }}>
       {children}
       <div className="toast-container">
         {toasts.map((t) => (
@@ -46,4 +54,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       </div>
     </ToastContext.Provider>
   );
+}
+
+export function useToast() {
+  return useContext(ToastContext).notify;
 }

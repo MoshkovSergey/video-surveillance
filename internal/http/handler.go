@@ -62,6 +62,9 @@ func NewHandler(
 	// Auth (protected)
 	mux.HandleFunc("GET /api/v1/auth/me", h.requireAuth(h.handleMe))
 
+	// Discovery (admin only)
+	mux.HandleFunc("POST /api/v1/discovery/scan", h.requireRoles(h.handleDiscoveryScan, domain.RoleAdmin))
+
 	// ONVIF (admin/operator)
 	mux.HandleFunc("POST /api/v1/onvif/probe", h.requireRoles(h.handleOnvifProbe, domain.RoleAdmin, domain.RoleOperator))
 

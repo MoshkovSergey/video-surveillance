@@ -11,6 +11,7 @@ import CameraViewPage from './pages/CameraViewPage';
 import ArchivePage from './pages/ArchivePage';
 import EventsPage from './pages/EventsPage';
 import UsersPage from './pages/UsersPage';
+import DiscoveryPage from './pages/DiscoveryPage';
 
 const queryClient = new QueryClient();
 
@@ -31,6 +32,7 @@ function App() {
                   <Route path="/archive" element={<ArchivePage />} />
                   <Route path="/events" element={<EventsPage />} />
                   <Route path="/users" element={<UsersPage />} />
+                  <Route path="/discovery" element={<DiscoveryPage />} />
                 </Route>
               </Route>
             </Routes>

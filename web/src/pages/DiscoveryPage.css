@@ -1,0 +1,81 @@
+.disc-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: var(--glass);
+  backdrop-filter: blur(14px);
+  margin-bottom: 20px;
+  max-width: 720px;
+}
+
+.disc-desc {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+
+.disc-scan-btn {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.disc-radar {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 0 10px #ffffff;
+  animation: pulse-dot 1s infinite;
+}
+
+.disc-addr {
+  font-family: var(--font-display);
+  font-size: 0.85rem;
+  color: #67e8f9;
+}
+
+.disc-badge {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  border: 1px solid;
+}
+
+.disc-badge-new {
+  color: #67e8f9;
+  border-color: rgba(6, 182, 212, 0.5);
+  background: rgba(6, 182, 212, 0.12);
+  box-shadow: 0 0 12px rgba(6, 182, 212, 0.25);
+}
+
+.disc-badge-added {
+  color: #86efac;
+  border-color: rgba(34, 197, 94, 0.5);
+  background: rgba(34, 197, 94, 0.12);
+  box-shadow: 0 0 12px rgba(34, 197, 94, 0.25);
+}
+
+.disc-muted {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.disc-spent {
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+
+.disc-spent-value {
+  color: #67e8f9;
+  font-weight: 600;
+  text-shadow: 0 0 8px rgba(6, 182, 212, 0.5);
+}

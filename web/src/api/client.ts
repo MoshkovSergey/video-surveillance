@@ -15,6 +15,7 @@ import type {
   LoginPayload,
   UserDTO,
 } from '../types/auth';
+import type { DiscoveredDevice, ScanResult } from '../types/discovery';
 
 const API_BASE = '/api/v1';
 
@@ -151,9 +152,18 @@ export async function createUser(payload: CreateUserPayload): Promise<UserDTO> {
   return res.json();
 }
 
+// ---------- Discovery (admin only) ----------
+
+export async function scanNetwork(): Promise<ScanResult> {
+  const res = await apiFetch('/discovery/scan', { method: 'POST' });
+  if (!res.ok) {
+    throw new Error(await parseError(res));
+  }
+  return (await res.json()) as ScanResult;
+}
+
 // ---------- ONVIF ----------
 
-// Опрос ONVIF-камеры: возвращает список профилей с RTSP-адресами.
 export async function probeOnvif(params: ONVIFParams): Promise<ONVIFProfile[]> {
   const res = await apiFetch('/onvif/probe', {
     method: 'POST',
