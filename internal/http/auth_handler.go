@@ -22,6 +22,7 @@ type userDTO struct {
 	ID       string `json:"id"`
 	Username string `json:"username"`
 	Role     string `json:"role"`
+	IsActive bool   `json:"is_active"`
 }
 
 type tokenResponse struct {
@@ -35,6 +36,7 @@ func newUserDTO(u *domain.User) userDTO {
 		ID:       u.ID.String(),
 		Username: u.Username,
 		Role:     string(u.Role),
+		IsActive: u.IsActive,
 	}
 }
 

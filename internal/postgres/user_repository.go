@@ -32,6 +32,15 @@ func (r *UserRepository) Count(ctx context.Context) (int, error) {
 	return n, nil
 }
 
+// CountByRole возвращает количество пользователей с указанной ролью.
+func (r *UserRepository) CountByRole(ctx context.Context, role domain.UserRole) (int, error) {
+	var n int
+	if err := r.pool.QueryRow(ctx, `SELECT count(*) FROM users WHERE role = $1`, role).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count users by role: %w", err)
+	}
+	return n, nil
+}
+
 // Create сохраняет нового пользователя.
 func (r *UserRepository) Create(ctx context.Context, u *domain.User) error {
 	if u.ID == uuid.Nil {
@@ -50,6 +59,31 @@ func (r *UserRepository) Create(ctx context.Context, u *domain.User) error {
 	)
 	if err != nil {
 		return fmt.Errorf("insert user: %w", err)
+	}
+	return nil
+}
+
+// Update обновляет данные пользователя.
+func (r *UserRepository) Update(ctx context.Context, u *domain.User) error {
+	query := `
+		UPDATE users
+		SET username = $1, password_hash = $2, role = $3, is_active = $4, updated_at = now()
+		WHERE id = $5
+	`
+	_, err := r.pool.Exec(ctx, query,
+		u.Username, u.PasswordHash, u.Role, u.IsActive, u.ID,
+	)
+	if err != nil {
+		return fmt.Errorf("update user: %w", err)
+	}
+	return nil
+}
+
+// Delete удаляет пользователя по идентификатору.
+func (r *UserRepository) Delete(ctx context.Context, id uuid.UUID) error {
+	_, err := r.pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("delete user: %w", err)
 	}
 	return nil
 }

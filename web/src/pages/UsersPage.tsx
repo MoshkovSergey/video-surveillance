@@ -1,9 +1,11 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { getUsers } from '../api/client';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { deleteUser, getUsers } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import UserCreateModal from '../components/UserCreateModal';
-import type { UserRole } from '../types/auth';
+import UserEditModal from '../components/UserEditModal';
+import { useToast } from '../components/Toast';
+import type { UserDTO, UserRole } from '../types/auth';
 import './UsersPage.css';
 
 const roleLabels: Record<UserRole, string> = {
@@ -15,17 +17,31 @@ const roleLabels: Record<UserRole, string> = {
 
 export default function UsersPage() {
   const { user } = useAuth();
+  const notify = useToast();
+  const queryClient = useQueryClient();
+
   const [createOpen, setCreateOpen] = useState(false);
+  const [editing, setEditing] = useState<UserDTO | null>(null);
 
   const isAdmin = user?.role === 'admin';
 
   const { data: users, isLoading, isError } = useQuery({
     queryKey: ['users'],
     queryFn: getUsers,
-    enabled: isAdmin, // не-админам запрос не выполняется
+    enabled: isAdmin,
   });
 
-  // Двойная защита: даже при прямом заходе по URL страница закрыта.
+  const deleteMutation = useMutation({
+    mutationFn: deleteUser,
+    onSuccess: () => {
+      notify('success', 'Пользователь удалён');
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+    },
+    onError: (error: Error) => {
+      notify('error', error.message);
+    },
+  });
+
   if (!isAdmin) {
     return (
       <div className="container">
@@ -33,6 +49,16 @@ export default function UsersPage() {
       </div>
     );
   }
+
+  const handleDelete = (target: UserDTO) => {
+    if (target.role === 'admin') {
+      notify('error', 'Администратора нельзя удалить — только изменить');
+      return;
+    }
+    if (window.confirm(`Удалить пользователя «${target.username}»?`)) {
+      deleteMutation.mutate(target.id);
+    }
+  };
 
   return (
     <div className="container">
@@ -53,6 +79,8 @@ export default function UsersPage() {
             <tr>
               <th>Имя пользователя</th>
               <th>Роль</th>
+              <th>Состояние</th>
+              <th>Действия</th>
             </tr>
           </thead>
           <tbody>
@@ -63,6 +91,30 @@ export default function UsersPage() {
                   <span className={`role-badge role-${u.role}`}>
                     {roleLabels[u.role] ?? u.role}
                   </span>
+                </td>
+                <td>
+                  {u.is_active ? (
+                    <span className="user-state user-active">активен</span>
+                  ) : (
+                    <span className="user-state user-disabled">отключён</span>
+                  )}
+                </td>
+                <td>
+                  <button className="btn-edit" onClick={() => setEditing(u)}>
+                    Изменить
+                  </button>
+                  <button
+                    className="btn-delete"
+                    disabled={u.role === 'admin' || deleteMutation.isPending}
+                    title={
+                      u.role === 'admin'
+                        ? 'Администратора нельзя удалить — только изменить'
+                        : 'Удалить пользователя'
+                    }
+                    onClick={() => handleDelete(u)}
+                  >
+                    Удалить
+                  </button>
                 </td>
               </tr>
             ))}
@@ -75,6 +127,7 @@ export default function UsersPage() {
       )}
 
       <UserCreateModal open={createOpen} onClose={() => setCreateOpen(false)} />
+      <UserEditModal user={editing} onClose={() => setEditing(null)} />
     </div>
   );
 }

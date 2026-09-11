@@ -13,9 +13,10 @@ import type {
   AuthUser,
   CreateUserPayload,
   LoginPayload,
+  UpdateUserPayload,
   UserDTO,
 } from '../types/auth';
-import type { DiscoveredDevice, ScanResult } from '../types/discovery';
+import type { ScanResult } from '../types/discovery';
 
 const API_BASE = '/api/v1';
 
@@ -150,6 +151,27 @@ export async function createUser(payload: CreateUserPayload): Promise<UserDTO> {
     throw new Error(await parseError(res));
   }
   return res.json();
+}
+
+export async function updateUser(id: string, payload: UpdateUserPayload): Promise<UserDTO> {
+  const res = await apiFetch(`/users/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    throw new Error(await parseError(res));
+  }
+  return res.json();
+}
+
+export async function deleteUser(id: string): Promise<void> {
+  const res = await apiFetch(`/users/${id}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) {
+    throw new Error(await parseError(res));
+  }
 }
 
 // ---------- Discovery (admin only) ----------

@@ -22,10 +22,18 @@ export interface UserDTO {
   id: string;
   username: string;
   role: UserRole;
+  is_active: boolean;
 }
 
 export interface CreateUserPayload {
   username: string;
   password: string;
   role: UserRole;
+}
+
+export interface UpdateUserPayload {
+  username?: string;
+  password?: string;
+  role?: UserRole;
+  is_active?: boolean;
 }

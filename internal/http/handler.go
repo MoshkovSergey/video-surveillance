@@ -86,6 +86,8 @@ func NewHandler(
 	// Users API (admin only)
 	mux.HandleFunc("GET /api/v1/users", h.requireRoles(h.handleListUsers, domain.RoleAdmin))
 	mux.HandleFunc("POST /api/v1/users", h.requireRoles(h.handleCreateUser, domain.RoleAdmin))
+	mux.HandleFunc("PATCH /api/v1/users/{id}", h.requireRoles(h.handleUpdateUser, domain.RoleAdmin))
+	mux.HandleFunc("DELETE /api/v1/users/{id}", h.requireRoles(h.handleDeleteUser, domain.RoleAdmin))
 
 	return h.recover(h.logRequests(h.authMiddleware(mux)))
 }
