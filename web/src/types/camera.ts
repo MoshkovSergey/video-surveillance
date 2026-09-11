@@ -7,7 +7,7 @@ export interface Camera {
   location?: string;
   fire_zone_id?: string;
   status: CameraStatus;
-  config: Record<string, any>;
+  config: Record<string, unknown>;
   created_at: string;
   updated_at: string;
 }
@@ -17,4 +17,19 @@ export interface StreamInfo {
   rtsp_url: string;
   hls_url: string;
   webrtc_url: string;
+}
+
+export interface CreateCameraPayload {
+  name: string;
+  rtsp_uri: string;
+  location?: string;
+  config?: Record<string, unknown>;
+}
+
+export interface UpdateCameraPayload {
+  name?: string;
+  rtsp_uri?: string;
+  location?: string;
+  status?: CameraStatus;
+  config?: Record<string, unknown>;
 }

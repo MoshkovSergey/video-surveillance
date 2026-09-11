@@ -1,30 +1,63 @@
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { getCameras } from '../api/client';
+import { deleteCamera, getCameras } from '../api/client';
+import CameraForm from '../components/CameraForm';
+import { useToast } from '../components/Toast';
 import type { CameraStatus } from '../types/camera';
 
-// Вспомогательная функция для цветового индикатора статуса
-const getStatusColor = (status: CameraStatus) => {
+const getStatusColor = (status: CameraStatus): string => {
   switch (status) {
-    case 'enabled': return '#28a745'; // Зеленый
-    case 'disabled': return '#6c757d'; // Серый
-    case 'error': return '#dc3545'; // Красный
-    default: return '#000';
+    case 'enabled':
+      return '#28a745';
+    case 'disabled':
+      return '#6c757d';
+    case 'error':
+      return '#dc3545';
+    default:
+      return '#000000';
   }
 };
 
 export default function CameraListPage() {
+  const queryClient = useQueryClient();
+  const notify = useToast();
+
   const { data: cameras, isLoading, isError } = useQuery({
     queryKey: ['cameras'],
     queryFn: getCameras,
   });
 
+  const deleteMutation = useMutation({
+    mutationFn: deleteCamera,
+    onSuccess: () => {
+      notify('success', 'Камера удалена');
+      queryClient.invalidateQueries({ queryKey: ['cameras'] });
+    },
+    onError: (error: Error) => {
+      notify('error', error.message);
+    },
+  });
+
+  const handleDelete = (id: string, name: string) => {
+    if (window.confirm(`Удалить камеру «${name}»? Действие необратимо.`)) {
+      deleteMutation.mutate(id);
+    }
+  };
+
   if (isLoading) return <div className="loading">Загрузка камер...</div>;
-  if (isError) return <div className="error">Ошибка загрузки камер. Убедитесь, что бэкенд запущен.</div>;
+  if (isError)
+    return (
+      <div className="error">
+        Ошибка загрузки камер. Убедитесь, что бэкенд запущен.
+      </div>
+    );
 
   return (
     <div className="container">
       <h1>Камеры видеонаблюдения</h1>
+
+      <CameraForm />
+
       <table className="camera-table">
         <thead>
           <tr>
@@ -40,8 +73,8 @@ export default function CameraListPage() {
               <td>{cam.name}</td>
               <td>{cam.location || '—'}</td>
               <td>
-                <span 
-                  className="status-badge" 
+                <span
+                  className="status-badge"
                   style={{ backgroundColor: getStatusColor(cam.status) }}
                 >
                   {cam.status}
@@ -51,6 +84,13 @@ export default function CameraListPage() {
                 <Link to={`/cameras/${cam.id}/view`} className="btn-view">
                   Смотреть
                 </Link>
+                <button
+                  className="btn-delete"
+                  disabled={deleteMutation.isPending}
+                  onClick={() => handleDelete(cam.id, cam.name)}
+                >
+                  Удалить
+                </button>
               </td>
             </tr>
           ))}
