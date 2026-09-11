@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"gitverse.ru/cataclysm78/video-surveillance/internal/mediamtx"
 	"gitverse.ru/cataclysm78/video-surveillance/internal/postgres"
 )
 
@@ -16,14 +17,16 @@ import (
 type Handler struct {
 	pool       *pgxpool.Pool
 	cameraRepo *postgres.CameraRepository
+	media      *mediamtx.Client
 	logger     *slog.Logger
 }
 
 // NewHandler создает HTTP-обработчик и регистрирует маршруты.
-func NewHandler(pool *pgxpool.Pool, cameraRepo *postgres.CameraRepository, logger *slog.Logger) http.Handler {
+func NewHandler(pool *pgxpool.Pool, cameraRepo *postgres.CameraRepository, media *mediamtx.Client, logger *slog.Logger) http.Handler {
 	h := &Handler{
 		pool:       pool,
 		cameraRepo: cameraRepo,
+		media:      media,
 		logger:     logger,
 	}
 
@@ -57,12 +60,15 @@ func (h *Handler) handleHealthzDB(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	var one int
+
 	if err := h.pool.QueryRow(ctx, "SELECT 1").Scan(&one); err != nil {
 		h.logger.Error("database health check failed", "error", err)
+
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
 			"status":   "error",
 			"database": "unavailable",
 		})
+
 		return
 	}
 
@@ -76,7 +82,9 @@ func (h *Handler) handleHealthzDB(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) logRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
+
 		next.ServeHTTP(w, r)
+
 		h.logger.Info(
 			"http request",
 			"method", r.Method,
@@ -93,12 +101,14 @@ func (h *Handler) recover(next http.Handler) http.Handler {
 		defer func() {
 			if recovered := recover(); recovered != nil {
 				h.logger.Error("panic recovered", "panic", recovered, "path", r.URL.Path)
+
 				writeJSON(w, http.StatusInternalServerError, map[string]string{
 					"status":  "error",
 					"message": "internal server error",
 				})
 			}
 		}()
+
 		next.ServeHTTP(w, r)
 	})
 }

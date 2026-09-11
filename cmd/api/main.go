@@ -13,7 +13,9 @@ import (
 	"github.com/joho/godotenv"
 
 	"gitverse.ru/cataclysm78/video-surveillance/internal/config"
+	"gitverse.ru/cataclysm78/video-surveillance/internal/domain"
 	httpapi "gitverse.ru/cataclysm78/video-surveillance/internal/http"
+	"gitverse.ru/cataclysm78/video-surveillance/internal/mediamtx"
 	"gitverse.ru/cataclysm78/video-surveillance/internal/postgres"
 )
 
@@ -44,7 +46,12 @@ func main() {
 	logger.Info("database connection established")
 
 	cameraRepo := postgres.NewCameraRepository(pool)
-	handler := httpapi.NewHandler(pool, cameraRepo, logger)
+	media := mediamtx.NewClient(cfg.MediaMTXAPIURL)
+
+	// Регистрируем в MediaMTX все активные камеры из базы данных.
+	syncMediaPaths(ctx, cameraRepo, media, logger)
+
+	handler := httpapi.NewHandler(pool, cameraRepo, media, logger)
 
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,
@@ -76,6 +83,36 @@ func main() {
 	}
 
 	logger.Info("server stopped")
+}
+
+// syncMediaPaths регистрирует пути MediaMTX для всех активных камер из базы данных.
+func syncMediaPaths(ctx context.Context, repo *postgres.CameraRepository, media *mediamtx.Client, logger *slog.Logger) {
+	// Сначала убеждаемся, что на указанном порту отвечает именно MediaMTX.
+	if err := media.Ping(ctx); err != nil {
+		logger.Error("mediamtx api is not available; stream paths will not be registered", "error", err)
+		return
+	}
+
+	cams, err := repo.List(ctx)
+	if err != nil {
+		logger.Error("failed to list cameras for mediamtx sync", "error", err)
+		return
+	}
+
+	for _, cam := range cams {
+		if cam.Status != domain.CameraStatusEnabled {
+			continue
+		}
+
+		if err := media.AddPath(ctx, "cam_"+cam.ID.String(), cam.RTSPUri); err != nil {
+			logger.Error("failed to sync mediamtx path",
+				"camera_id", cam.ID.String(),
+				"error", err,
+			)
+		}
+	}
+
+	logger.Info("mediamtx paths synchronized", "cameras", len(cams))
 }
 
 func newLogger(cfg config.Config) *slog.Logger {

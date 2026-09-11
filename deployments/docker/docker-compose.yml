@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: ${POSTGRES_IMAGE:-postgres:alpine}
+    image: ${POSTGRES_IMAGE:-postgres:17-alpine}
     container_name: vs-postgres
     restart: unless-stopped
 
@@ -26,13 +26,15 @@ services:
     image: bluenviron/mediamtx:latest
     container_name: vs-mediamtx
     restart: unless-stopped
+    volumes:
+      - ./mediamtx.yml:/mediamtx.yml:ro
+
     ports:
-      - "8554:8554" # RTSP
-      - "1935:1935" # RTMP
-      - "8888:8888" # HLS
-      - "8889:8889" # WebRTC
-      - "8830:8830" # MediaMTX HTTP API
-    # MediaMTX стартует мгновенно и не требует сложного healthcheck для MVP
+      - "8554:8554"   # RTSP
+      - "1935:1935"   # RTMP
+      - "8888:8888"   # HLS
+      - "8889:8889"   # WebRTC
+      - "9999:9999"   # MediaMTX HTTP API
 
 volumes:
   vs_postgres_data:

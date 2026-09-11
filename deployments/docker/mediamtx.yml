@@ -1,0 +1,37 @@
+# MediaMTX v1.21 minimal configuration
+logLevel: info
+
+# Control API
+api: true
+apiAddress: :9999
+
+# Disable authentication for API: wildcard user 'any' allows all requests
+authMethod: internal
+authInternalUsers:
+  - user: any
+    permissions:
+      - action: publish
+      - action: read
+      - action: playback
+      - action: api
+
+# Protocol listeners
+rtsp: true
+rtspAddress: :8554
+
+rtmp: true
+rtmpAddress: :1935
+
+hls: true
+hlsAddress: :8888
+
+webrtc: true
+webrtcAddress: :8889
+
+srt: true
+srtAddress: :8890
+
+# Critical: pull RTSP source from camera only when a viewer connects
+pathDefaults:
+  sourceOnDemand: true
+  sourceOnDemandCloseAfter: 30s

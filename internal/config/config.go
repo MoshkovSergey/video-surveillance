@@ -14,6 +14,7 @@ type Config struct {
 	HTTPAddr        string
 	LogLevel        string
 	DatabaseURL     string
+	MediaMTXAPIURL  string
 	ShutdownTimeout time.Duration
 }
 
@@ -24,11 +25,16 @@ func Load() (Config, error) {
 		HTTPAddr:        getEnv("HTTP_ADDR", ":8080"),
 		LogLevel:        getEnv("LOG_LEVEL", "info"),
 		DatabaseURL:     os.Getenv("DATABASE_URL"),
+		MediaMTXAPIURL:  getEnv("MEDIAMTX_API_URL", "http://localhost:9997"),
 		ShutdownTimeout: 10 * time.Second,
 	}
 
 	if strings.TrimSpace(cfg.DatabaseURL) == "" {
 		return Config{}, fmt.Errorf("DATABASE_URL must not be empty")
+	}
+
+	if strings.TrimSpace(cfg.MediaMTXAPIURL) == "" {
+		return Config{}, fmt.Errorf("MEDIAMTX_API_URL must not be empty")
 	}
 
 	return cfg, nil
