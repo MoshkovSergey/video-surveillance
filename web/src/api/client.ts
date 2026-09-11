@@ -16,7 +16,7 @@ import type {
   UpdateUserPayload,
   UserDTO,
 } from '../types/auth';
-import type { DiscoveredDevice, ScanResult } from '../types/discovery';
+import type { ScanResult } from '../types/discovery';
 import type {
   SettingsDTO,
   TelegramTestPayload,

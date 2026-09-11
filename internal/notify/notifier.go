@@ -31,6 +31,8 @@ const (
 const (
 	sendTimeout = 10 * time.Second
 	batchLimit  = 50
+	// maxVideoBytes — предел Bot API Telegram на загрузку видео (50 МБ), с запасом.
+	maxVideoBytes = 45 * 1024 * 1024
 )
 
 var eventTitles = map[domain.EventType]struct{ emoji, title string }{
@@ -43,7 +45,18 @@ var eventTitles = map[domain.EventType]struct{ emoji, title string }{
 	domain.EventRecordingError: {emoji: "⛔", title: "Ошибка записи"},
 }
 
+// MotionClipInfo описывает готовый фрагмент движения для уведомления.
+type MotionClipInfo struct {
+	CameraID    uuid.UUID
+	ClipRel     string
+	SnapshotRel string
+	WindowStart time.Time
+	WindowEnd   time.Time
+	DurationSec int
+}
+
 // Notifier опрашивает журнал событий и отправляет уведомления в Telegram.
+// Фото движения уходит сразу при событии; видео — когда готов клип.
 type Notifier struct {
 	eventRepo   *postgres.EventRepository
 	cameraRepo  *postgres.CameraRepository
@@ -128,6 +141,17 @@ func (n *Notifier) config(ctx context.Context) notifyConfig {
 	return cfg
 }
 
+func (n *Notifier) cameraNames(ctx context.Context) map[uuid.UUID]string {
+	names := make(map[uuid.UUID]string)
+	if cams, err := n.cameraRepo.List(ctx); err == nil {
+		for _, cam := range cams {
+			names[cam.ID] = cam.Name
+		}
+	}
+	return names
+}
+
+// process рассылает события журнала, включая движение со снимком кадра.
 func (n *Notifier) process(ctx context.Context) {
 	cfg := n.config(ctx)
 
@@ -141,12 +165,7 @@ func (n *Notifier) process(ctx context.Context) {
 		return
 	}
 
-	names := make(map[uuid.UUID]string)
-	if cams, err := n.cameraRepo.List(ctx); err == nil {
-		for _, cam := range cams {
-			names[cam.ID] = cam.Name
-		}
-	}
+	names := n.cameraNames(ctx)
 
 	maxTs := n.lastTs
 	for _, ev := range events {
@@ -167,7 +186,7 @@ func (n *Notifier) process(ctx context.Context) {
 
 		text := n.message(ev, names)
 
-		// События движения отправляем со снимком кадра, если он есть.
+		// Событие движения отправляем сразу со снимком кадра.
 		if rel, ok := ev.Payload["snapshot"].(string); ok && rel != "" {
 			photo := filepath.Join(n.storageRoot, filepath.FromSlash(rel))
 			if _, err := os.Stat(photo); err == nil {
@@ -197,6 +216,80 @@ func (n *Notifier) process(ctx context.Context) {
 	if len(n.seen) > 1000 {
 		n.seen = make(map[uuid.UUID]bool)
 	}
+}
+
+// NotifyMotionClip отправляет видеофрагмент, когда клип готов и в архиве.
+func (n *Notifier) NotifyMotionClip(ctx context.Context, info MotionClipInfo) {
+	cfg := n.config(ctx)
+	if !cfg.enabled || cfg.token == "" || cfg.chat == "" {
+		return
+	}
+	if !cfg.events[string(domain.EventMotion)] {
+		return
+	}
+
+	text := n.motionText(info, n.cameraNames(ctx)) + "🎬 <b>Видеофрагмент архива</b>\n"
+
+	clipPath := filepath.Join(n.storageRoot, filepath.FromSlash(info.ClipRel))
+	fi, err := os.Stat(clipPath)
+	if err != nil {
+		n.logger.Warn("notify: clip file missing", "clip", info.ClipRel, "error", err)
+		n.NotifyMotionFallback(ctx, info, "файл фрагмента не найден")
+		return
+	}
+	if fi.Size() > maxVideoBytes {
+		n.NotifyMotionFallback(ctx, info, "фрагмент превышает лимит Telegram 50 МБ")
+		return
+	}
+
+	if err := SendTelegramVideo(ctx, cfg.token, cfg.chat, clipPath, text); err != nil {
+		n.logger.Warn("notify: telegram video send failed",
+			"camera_id", info.CameraID,
+			"error", err,
+		)
+		return
+	}
+
+	n.logger.Info("notify: telegram motion video sent",
+		"camera_id", info.CameraID,
+		"clip", info.ClipRel,
+	)
+}
+
+// NotifyMotionFallback сообщает о движении без видеофрагента (задача не удалась).
+func (n *Notifier) NotifyMotionFallback(ctx context.Context, info MotionClipInfo, reason string) {
+	cfg := n.config(ctx)
+	if !cfg.enabled || cfg.token == "" || cfg.chat == "" {
+		return
+	}
+	if !cfg.events[string(domain.EventMotion)] {
+		return
+	}
+
+	text := n.motionText(info, n.cameraNames(ctx)) +
+		"⚠️ Видеофрагмент недоступен: " + reason + "\n"
+
+	if err := SendTelegram(ctx, cfg.token, cfg.chat, text); err != nil {
+		n.logger.Warn("notify: telegram send failed", "camera_id", info.CameraID, "error", err)
+	}
+}
+
+func (n *Notifier) motionText(info MotionClipInfo, names map[uuid.UUID]string) string {
+	var sb strings.Builder
+	sb.WriteString("🚶 <b>Движение</b>\n")
+
+	name := names[info.CameraID]
+	if name == "" {
+		name = info.CameraID.String()
+	}
+	sb.WriteString("Камера: " + escapeHTML(name) + "\n")
+	sb.WriteString("Период: " +
+		info.WindowStart.Format("02.01.2006 15:04:05") + " — " +
+		info.WindowEnd.Format("02.01.2006 15:04:05") + "\n")
+	if info.DurationSec > 0 {
+		sb.WriteString(fmt.Sprintf("Длительность: %d с\n", info.DurationSec))
+	}
+	return sb.String()
 }
 
 func (n *Notifier) message(ev domain.Event, names map[uuid.UUID]string) string {
@@ -305,6 +398,67 @@ func SendTelegramPhoto(ctx context.Context, token, chat, photoPath, caption stri
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		"https://api.telegram.org/bot"+token+"/sendPhoto", &buf)
+	if err != nil {
+		return fmt.Errorf("create telegram request: %w", err)
+	}
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("telegram request: %w", err)
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusOK {
+		var tg struct {
+			Description string `json:"description"`
+		}
+		_ = json.NewDecoder(res.Body).Decode(&tg)
+		return fmt.Errorf("telegram api: статус %d: %s", res.StatusCode, tg.Description)
+	}
+	return nil
+}
+
+// SendTelegramVideo отправляет видеофрагмент через Bot API Telegram.
+func SendTelegramVideo(ctx context.Context, token, chat, videoPath, caption string) error {
+	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	defer cancel()
+
+	f, err := os.Open(videoPath)
+	if err != nil {
+		return fmt.Errorf("open video: %w", err)
+	}
+	defer f.Close()
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+
+	if err := mw.WriteField("chat_id", chat); err != nil {
+		return fmt.Errorf("telegram multipart: %w", err)
+	}
+	if err := mw.WriteField("caption", caption); err != nil {
+		return fmt.Errorf("telegram multipart: %w", err)
+	}
+	if err := mw.WriteField("parse_mode", "HTML"); err != nil {
+		return fmt.Errorf("telegram multipart: %w", err)
+	}
+	if err := mw.WriteField("supports_streaming", "true"); err != nil {
+		return fmt.Errorf("telegram multipart: %w", err)
+	}
+
+	part, err := mw.CreateFormFile("video", filepath.Base(videoPath))
+	if err != nil {
+		return fmt.Errorf("telegram multipart: %w", err)
+	}
+	if _, err := io.Copy(part, f); err != nil {
+		return fmt.Errorf("telegram multipart copy: %w", err)
+	}
+	if err := mw.Close(); err != nil {
+		return fmt.Errorf("telegram multipart close: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://api.telegram.org/bot"+token+"/sendVideo", &buf)
 	if err != nil {
 		return fmt.Errorf("create telegram request: %w", err)
 	}
