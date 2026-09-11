@@ -124,6 +124,8 @@
   color: rgba(255, 255, 255, 0.12);
 }
 
+/* ---------- Шапка ячейки: название + режим записи ---------- */
+
 .cell-header {
   position: absolute;
   top: 0;
@@ -131,10 +133,18 @@
   right: 0;
   z-index: 2;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   padding: 8px 10px;
   background: linear-gradient(180deg, rgba(5, 6, 15, 0.85), transparent);
+}
+
+.cell-titles {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
 }
 
 .cell-name {
@@ -147,8 +157,31 @@
   white-space: nowrap;
 }
 
+.cell-mode {
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cell-mode-motion {
+  color: #67e8f9;
+  text-shadow: 0 0 8px rgba(6, 182, 212, 0.65);
+}
+
+.cell-mode-continuous {
+  color: var(--muted);
+}
+
+.cell-header .status-dot {
+  margin-top: 4px;
+}
+
 .cell-clear {
-  margin-left: auto;
+  margin-top: 2px;
   width: 22px;
   height: 22px;
   border-radius: 6px;
@@ -163,6 +196,8 @@
   background: rgba(239, 68, 68, 0.35);
   border-color: rgba(239, 68, 68, 0.6);
 }
+
+/* ---------- Видео в ячейке ---------- */
 
 .cell-video {
   flex: 1;

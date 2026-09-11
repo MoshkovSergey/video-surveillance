@@ -219,6 +219,8 @@ export default function MonitorPage() {
         >
           {view.map((camId, i) => {
             const cam = camId ? cameraById.get(camId) : undefined;
+            const isMotion =
+              cam?.recording_mode === 'motion' && cam.motion_detection === true;
 
             return (
               <div
@@ -233,7 +235,17 @@ export default function MonitorPage() {
                 {cam ? (
                   <>
                     <div className="cell-header">
-                      <span className="cell-name">{cam.name}</span>
+                      <div className="cell-titles">
+                        <span className="cell-name">{cam.name}</span>
+                        <span
+                          className={[
+                            'cell-mode',
+                            isMotion ? 'cell-mode-motion' : 'cell-mode-continuous',
+                          ].join(' ')}
+                        >
+                          {isMotion ? 'по движению' : 'непрерывно'}
+                        </span>
+                      </div>
                       <span className={`status-dot status-${cam.status}`} />
                       <button
                         className="cell-clear"
@@ -272,7 +284,8 @@ export default function MonitorPage() {
         <div className="side-list">
           {sortedCameras.map((cam) => {
             const masterIdx = layout.indexOf(cam.id);
-            const cellIdx = masterIdx !== -1 && masterIdx < gridSize ? masterIdx : -1;
+            const cellIdx =
+              masterIdx !== -1 && masterIdx < gridSize ? masterIdx : -1;
 
             return (
               <button

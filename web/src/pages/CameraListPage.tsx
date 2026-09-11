@@ -99,39 +99,57 @@ export default function CameraListPage() {
           </tr>
         </thead>
         <tbody>
-          {cameras?.map((cam: Camera) => (
-            <tr key={cam.id}>
-              <td>{cam.name}</td>
-              <td>{cam.location || '—'}</td>
-              <td>
-                <span className={`status-badge status-${cam.status}`}>
-                  {statusLabels[cam.status] ?? cam.status}
-                </span>
-              </td>
-              <td>
-                <Link to={`/cameras/${cam.id}/view`} className="btn-view">
-                  Смотреть
-                </Link>
-                {canManage && (
-                  <button
-                    className="btn-edit"
-                    onClick={() => setEditingCamera(cam)}
-                  >
-                    Изменить
-                  </button>
-                )}
-                {canDelete && (
-                  <button
-                    className="btn-delete"
-                    disabled={deleteMutation.isPending}
-                    onClick={() => handleDelete(cam.id, cam.name)}
-                  >
-                    Удалить
-                  </button>
-                )}
-              </td>
-            </tr>
-          ))}
+          {cameras?.map((cam: Camera) => {
+            const isMotion =
+              cam.recording_mode === 'motion' && cam.motion_detection === true;
+
+            return (
+              <tr key={cam.id}>
+                <td>{cam.name}</td>
+                <td>{cam.location || '—'}</td>
+                <td>
+                  <div className="status-cell">
+                    <span className={`status-badge status-${cam.status}`}>
+                      {statusLabels[cam.status] ?? cam.status}
+                    </span>
+
+                    {isMotion ? (
+                      <span className="mode-badge mode-motion" title="Запись по движению">
+                        <span className="mode-dot" />
+                        по движению
+                      </span>
+                    ) : (
+                      <span className="mode-badge mode-continuous" title="Непрерывная запись">
+                        непрерывно
+                      </span>
+                    )}
+                  </div>
+                </td>
+                <td>
+                  <Link to={`/cameras/${cam.id}/view`} className="btn-view">
+                    Смотреть
+                  </Link>
+                  {canManage && (
+                    <button
+                      className="btn-edit"
+                      onClick={() => setEditingCamera(cam)}
+                    >
+                      Изменить
+                    </button>
+                  )}
+                  {canDelete && (
+                    <button
+                      className="btn-delete"
+                      disabled={deleteMutation.isPending}
+                      onClick={() => handleDelete(cam.id, cam.name)}
+                    >
+                      Удалить
+                    </button>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
 
