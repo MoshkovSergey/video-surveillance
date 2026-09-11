@@ -250,6 +250,14 @@ export default function CameraForm() {
         </select>
       </label>
 
+      {/* Подсказка видна только в режиме «По движению». */}
+      {recordingMode === 'motion' && (
+        <p className="form-hint">
+          В архив сохраняются эпизоды движения с предзаписью 5 с; буфер хранит 3
+          последних сегмента по 5 минут.
+        </p>
+      )}
+
       <div className="switch-row">
         <span className="switch-label">
           <span className="switch-title">Детекция движения (ONVIF)</span>

@@ -17,8 +17,9 @@ import (
 	"gitverse.ru/cataclysm78/video-surveillance/internal/postgres"
 )
 
-// bufferRetention — время жизни буферных сегментов в режиме «по движению».
-const bufferRetention = 10 * time.Minute
+// keepBufferSegments — сколько завершённых сегментов буфера режима
+// «по движению» хранить на диске (3 сегмента по 5 минут = 15 минут).
+const keepBufferSegments = 3
 
 // errCameraMissing означает, что камера удалена из базы,
 // а её каталог с записями остался на диске.
@@ -118,7 +119,7 @@ func (s *Scanner) scan(ctx context.Context) {
 		existing = append(existing, paths...)
 	}
 
-	// Очистка буфера в режиме «по движению» не зависит от успеха prune.
+	// Очистка буфера режима «по движению»: храним 3 последних сегмента.
 	s.cleanupMotionBuffers(ctx)
 
 	if scanFailed {
@@ -136,8 +137,8 @@ func (s *Scanner) scan(ctx context.Context) {
 	}
 }
 
-// cleanupMotionBuffers удаляет буферные сегменты камер в режиме «по движению»,
-// которые не помечены к хранению и старше bufferRetention.
+// cleanupMotionBuffers удаляет сегменты буфера сверх лимита keepBufferSegments.
+// Помеченные kept (эпизоды движения) не удаляются никогда.
 func (s *Scanner) cleanupMotionBuffers(ctx context.Context) {
 	cams, err := s.cameraRepo.List(ctx)
 	if err != nil {
@@ -145,21 +146,23 @@ func (s *Scanner) cleanupMotionBuffers(ctx context.Context) {
 		return
 	}
 
-	cutoff := time.Now().Add(-bufferRetention)
-
 	for _, cam := range cams {
 		if cam.RecordingMode != domain.RecordingMotion {
 			continue
 		}
 
-		rows, err := s.repo.ListExpiredBuffer(ctx, cam.ID, cutoff)
+		rows, err := s.repo.ListMotionBuffer(ctx, cam.ID)
 		if err != nil {
-			s.logger.Error("failed to list expired buffer", "camera_id", cam.ID, "error", err)
+			s.logger.Error("failed to list motion buffer", "camera_id", cam.ID, "error", err)
+			continue
+		}
+
+		if len(rows) <= keepBufferSegments {
 			continue
 		}
 
 		deleted := 0
-		for _, row := range rows {
+		for _, row := range rows[keepBufferSegments:] {
 			if err := os.Remove(row.StoragePath); err != nil && !os.IsNotExist(err) {
 				s.logger.Error("failed to remove buffer file",
 					"path", row.StoragePath,
@@ -178,7 +181,11 @@ func (s *Scanner) cleanupMotionBuffers(ctx context.Context) {
 		}
 
 		if deleted > 0 {
-			s.logger.Info("motion buffer cleanup", "camera_id", cam.ID, "deleted", deleted)
+			s.logger.Info("motion buffer trimmed to last segments",
+				"camera_id", cam.ID,
+				"kept", keepBufferSegments,
+				"deleted", deleted,
+			)
 		}
 	}
 }

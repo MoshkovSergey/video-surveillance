@@ -74,7 +74,7 @@ func (r *RecordingRepository) List(ctx context.Context, cameraID *uuid.UUID, fro
 	return recordings, nil
 }
 
-// GetByID возвращает сегмент по идентификатору. Если не найден — nil, nil.
+// GetByID возвращает сегмент по идентификатору.
 func (r *RecordingRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.Recording, error) {
 	query := `
 		SELECT id, camera_id, started_at, ended_at, storage_path, size_bytes, kept, created_at
@@ -92,7 +92,8 @@ func (r *RecordingRepository) GetByID(ctx context.Context, id uuid.UUID) (*domai
 	return &rec, nil
 }
 
-// MarkKept помечает сегменты, попавшие в окно эпизода движения, к постоянному хранению.
+// MarkKept помечает сегменты, попавшие в окно эпизода движения
+// (предзапись 5 с до триггера и пост-окно после), к постоянному хранению.
 func (r *RecordingRepository) MarkKept(ctx context.Context, cameraID uuid.UUID, from, to time.Time) (int64, error) {
 	query := `
 		UPDATE recordings
@@ -109,22 +110,20 @@ func (r *RecordingRepository) MarkKept(ctx context.Context, cameraID uuid.UUID, 
 	return tag.RowsAffected(), nil
 }
 
-// ListExpiredBuffer возвращает сегменты буфера режима «по движению»,
-// не помеченные к хранению и закрытые раньше порога.
-func (r *RecordingRepository) ListExpiredBuffer(ctx context.Context, cameraID uuid.UUID, cutoff time.Time) ([]domain.Recording, error) {
+// ListMotionBuffer возвращает завершённые сегменты буфера режима «по движению»,
+// не помеченные к хранению, новые первыми.
+func (r *RecordingRepository) ListMotionBuffer(ctx context.Context, cameraID uuid.UUID) ([]domain.Recording, error) {
 	query := `
 		SELECT id, camera_id, started_at, ended_at, storage_path, size_bytes, kept, created_at
 		FROM recordings
 		WHERE camera_id = $1
 		  AND kept = false
 		  AND ended_at IS NOT NULL
-		  AND ended_at < $2
 		ORDER BY started_at DESC
-		LIMIT 200
 	`
-	rows, err := r.pool.Query(ctx, query, cameraID, cutoff)
+	rows, err := r.pool.Query(ctx, query, cameraID)
 	if err != nil {
-		return nil, fmt.Errorf("query expired buffer: %w", err)
+		return nil, fmt.Errorf("query motion buffer: %w", err)
 	}
 	defer rows.Close()
 
@@ -154,7 +153,7 @@ func (r *RecordingRepository) DeleteByID(ctx context.Context, id uuid.UUID) erro
 	return nil
 }
 
-// Delete удаляет метаданные сегмента по идентификатору (алиас для совместимости).
+// Delete удаляет метаданные сегмента по идентификатору (алиас).
 func (r *RecordingRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	return r.DeleteByID(ctx, id)
 }
@@ -173,5 +172,5 @@ func (r *RecordingRepository) PruneMissing(ctx context.Context, existing []strin
 	return tag.RowsAffected(), nil
 }
 
-// ensureJSON используется для документирования зависимости от encoding/json.
+// ensureJSON сохраняет зависимость от encoding/json для будущих расширений.
 var _ = json.Marshal

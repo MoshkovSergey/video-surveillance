@@ -251,3 +251,10 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.form-hint {
+  margin: -4px 0 4px;
+  font-size: 0.78rem;
+  color: var(--muted);
+  line-height: 1.5;
+}

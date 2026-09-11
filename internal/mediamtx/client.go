@@ -34,6 +34,9 @@ type pathsListResponse struct {
 	Items []PathInfo `json:"items"`
 }
 
+// recordSegmentDuration — длительность одного сегмента записи (5 минут).
+const recordSegmentDuration = "300s"
+
 // pathConfig описывает конфигурацию пути MediaMTX.
 type pathConfig struct {
 	Source                string `json:"source"`
@@ -52,7 +55,7 @@ func newPathConfig(sourceRTSP string) pathConfig {
 		SourceOnDemand:        &sourceOnDemand,
 		Record:                &record,
 		RecordPath:            "/recordings/%path/%Y-%m-%d_%H-%M-%S",
-		RecordSegmentDuration: "60s",
+		RecordSegmentDuration: recordSegmentDuration,
 	}
 }
 
@@ -110,9 +113,10 @@ func (c *Client) pathConfigGet(ctx context.Context, name string) (*pathConfig, b
 	return &cfg, true
 }
 
-// AddPath регистрирует путь камеры с непрерывной записью.
-// Если путь уже существует и его source совпадает — операция считается успешной.
-// Если source отличается — путь удаляется и создаётся заново.
+// AddPath регистрирует путь камеры с непрерывной записью сегментов по 5 минут.
+// Если путь существует и конфигурация совпадает — операция успешна.
+// При расхождении (например, изменилась длительность сегмента) путь
+// пересоздаётся через remove + add.
 func (c *Client) AddPath(ctx context.Context, name string, sourceRTSP string) error {
 	payload, err := json.Marshal(newPathConfig(sourceRTSP))
 	if err != nil {
@@ -129,8 +133,9 @@ func (c *Client) AddPath(ctx context.Context, name string, sourceRTSP string) er
 	}
 
 	if res.StatusCode == http.StatusBadRequest || res.StatusCode == http.StatusConflict {
-		// Путь уже существует: проверяем, требуется ли обновление.
-		if cfg, ok := c.pathConfigGet(ctx, name); ok && cfg.Source == sourceRTSP {
+		if cfg, ok := c.pathConfigGet(ctx, name); ok &&
+			cfg.Source == sourceRTSP &&
+			sameDuration(cfg.RecordSegmentDuration, recordSegmentDuration) {
 			return nil
 		}
 
@@ -170,12 +175,21 @@ func (c *Client) RemovePath(ctx context.Context, name string) error {
 		}
 	}
 
-	// Контрольная проверка: возможно, удаление всё же состоялось.
 	if _, still := c.pathConfigGet(ctx, name); !still {
 		return nil
 	}
 
 	return fmt.Errorf("mediamtx remove path %s: no working remove endpoint in this MediaMTX version", name)
+}
+
+// sameDuration сравнивает строковые длительности ("300s" и "5m0s" равны).
+func sameDuration(a, b string) bool {
+	da, erra := time.ParseDuration(a)
+	db, errb := time.ParseDuration(b)
+	if erra != nil || errb != nil {
+		return a == b
+	}
+	return da == db
 }
 
 func (c *Client) do(ctx context.Context, method, path string, body []byte) (*http.Response, []byte, error) {

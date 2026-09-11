@@ -18,8 +18,9 @@ const (
 	reconcileInterval = 30 * time.Second
 	// episodeCooldown — пауза без движения, завершающая эпизод.
 	episodeCooldown = 10 * time.Second
-	// preRoll и postRoll — границы окна архива вокруг эпизода.
-	preRoll  = 30 * time.Second
+	// preRoll — предзапись: окно архива начинается за 5 с до триггера.
+	preRoll = 5 * time.Second
+	// postRoll — запас после окончания эпизода.
 	postRoll = 30 * time.Second
 	// resubscribeAfter — срок жизни PullPoint-подписки.
 	resubscribeAfter = 4 * time.Minute
@@ -146,6 +147,8 @@ func (m *Manager) worker(ctx context.Context, cam domain.Camera) {
 			m.logger.Error("motion: failed to create event", "camera_id", cam.ID, "error", err)
 		}
 
+		// Окно архива: 5 с предзаписи до триггера и postRoll после окончания.
+		// Помеченные сегменты хранятся постоянно и не удаляются буфером.
 		kept, err := m.recRepo.MarkKept(ctx, cam.ID, episodeStart.Add(-preRoll), end.Add(postRoll))
 		if err != nil {
 			m.logger.Error("motion: failed to mark recordings kept", "camera_id", cam.ID, "error", err)

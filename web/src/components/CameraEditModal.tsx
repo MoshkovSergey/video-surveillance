@@ -1,14 +1,14 @@
-import { useEffect, useState, type FormEvent } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { updateCamera } from '../api/client';
-import { useToast } from './Toast';
+import { useEffect, useState, type FormEvent } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { updateCamera } from "../api/client";
+import { useToast } from "./Toast";
 import type {
   Camera,
   CameraSourceType,
   CameraStatus,
   RecordingMode,
-} from '../types/camera';
-import './CameraEditModal.css';
+} from "../types/camera";
+import "./CameraEditModal.css";
 
 interface CameraEditModalProps {
   camera: Camera | null;
@@ -18,51 +18,55 @@ interface CameraEditModalProps {
 // Модальное окно редактирования камеры.
 // Опрос профилей ONVIF здесь не выполняется: профиль сохраняется текущий,
 // а RTSP-адрес бэкенд повторно получает с камеры при сохранении.
-export default function CameraEditModal({ camera, onClose }: CameraEditModalProps) {
+export default function CameraEditModal({
+  camera,
+  onClose,
+}: CameraEditModalProps) {
   const queryClient = useQueryClient();
   const notify = useToast();
 
-  const [sourceType, setSourceType] = useState<CameraSourceType>('rtsp');
+  const [sourceType, setSourceType] = useState<CameraSourceType>("rtsp");
 
-  const [name, setName] = useState('');
-  const [rtspUri, setRtspUri] = useState('');
-  const [location, setLocation] = useState('');
-  const [status, setStatus] = useState<CameraStatus>('enabled');
+  const [name, setName] = useState("");
+  const [rtspUri, setRtspUri] = useState("");
+  const [location, setLocation] = useState("");
+  const [status, setStatus] = useState<CameraStatus>("enabled");
 
-  const [onvifHost, setOnvifHost] = useState('');
-  const [onvifPort, setOnvifPort] = useState('80');
-  const [onvifUsername, setOnvifUsername] = useState('');
-  const [onvifPassword, setOnvifPassword] = useState('');
+  const [onvifHost, setOnvifHost] = useState("");
+  const [onvifPort, setOnvifPort] = useState("80");
+  const [onvifUsername, setOnvifUsername] = useState("");
+  const [onvifPassword, setOnvifPassword] = useState("");
 
-  const [recordingMode, setRecordingMode] = useState<RecordingMode>('continuous');
+  const [recordingMode, setRecordingMode] =
+    useState<RecordingMode>("continuous");
   const [motionDetection, setMotionDetection] = useState(false);
 
   useEffect(() => {
     if (!camera) return;
 
     setName(camera.name);
-    setLocation(camera.location ?? '');
+    setLocation(camera.location ?? "");
     setStatus(camera.status);
-    setRecordingMode(camera.recording_mode ?? 'continuous');
+    setRecordingMode(camera.recording_mode ?? "continuous");
     setMotionDetection(camera.motion_detection ?? false);
 
-    const st = camera.source_type ?? 'rtsp';
+    const st = camera.source_type ?? "rtsp";
     setSourceType(st);
 
-    if (st === 'rtsp') {
+    if (st === "rtsp") {
       setRtspUri(camera.rtsp_uri);
     } else if (camera.onvif) {
       setOnvifHost(camera.onvif.host);
       setOnvifPort(String(camera.onvif.port ?? 80));
-      setOnvifUsername(camera.onvif.username ?? '');
-      setOnvifPassword(camera.onvif.password ?? '');
+      setOnvifUsername(camera.onvif.username ?? "");
+      setOnvifPassword(camera.onvif.password ?? "");
     }
   }, [camera]);
 
   const mutation = useMutation({
     mutationFn: () => {
       if (!camera) {
-        throw new Error('camera is not selected');
+        throw new Error("camera is not selected");
       }
 
       const payload: Parameters<typeof updateCamera>[1] = {
@@ -71,10 +75,10 @@ export default function CameraEditModal({ camera, onClose }: CameraEditModalProp
         status,
         source_type: sourceType,
         recording_mode: recordingMode,
-        motion_detection: motionDetection && sourceType === 'onvif',
+        motion_detection: motionDetection && sourceType === "onvif",
       };
 
-      if (sourceType === 'rtsp') {
+      if (sourceType === "rtsp") {
         payload.rtsp_uri = rtspUri.trim();
       } else {
         payload.onvif = {
@@ -89,12 +93,12 @@ export default function CameraEditModal({ camera, onClose }: CameraEditModalProp
       return updateCamera(camera.id, payload);
     },
     onSuccess: () => {
-      notify('success', 'Камера обновлена');
-      queryClient.invalidateQueries({ queryKey: ['cameras'] });
+      notify("success", "Камера обновлена");
+      queryClient.invalidateQueries({ queryKey: ["cameras"] });
       onClose();
     },
     onError: (error: Error) => {
-      notify('error', error.message);
+      notify("error", error.message);
     },
   });
 
@@ -116,15 +120,15 @@ export default function CameraEditModal({ camera, onClose }: CameraEditModalProp
           <div className="source-switcher">
             <button
               type="button"
-              className={`source-btn ${sourceType === 'rtsp' ? 'active' : ''}`}
-              onClick={() => setSourceType('rtsp')}
+              className={`source-btn ${sourceType === "rtsp" ? "active" : ""}`}
+              onClick={() => setSourceType("rtsp")}
             >
               RTSP
             </button>
             <button
               type="button"
-              className={`source-btn ${sourceType === 'onvif' ? 'active' : ''}`}
-              onClick={() => setSourceType('onvif')}
+              className={`source-btn ${sourceType === "onvif" ? "active" : ""}`}
+              onClick={() => setSourceType("onvif")}
             >
               ONVIF
             </button>
@@ -158,7 +162,7 @@ export default function CameraEditModal({ camera, onClose }: CameraEditModalProp
             </select>
           </label>
 
-          {sourceType === 'rtsp' ? (
+          {sourceType === "rtsp" ? (
             <label>
               RTSP URI
               <input
@@ -207,7 +211,9 @@ export default function CameraEditModal({ camera, onClose }: CameraEditModalProp
               {camera.onvif?.profile && (
                 <div className="modal-readonly">
                   <span className="modal-readonly-label">Текущий профиль</span>
-                  <span className="modal-readonly-value">{camera.onvif.profile}</span>
+                  <span className="modal-readonly-value">
+                    {camera.onvif.profile}
+                  </span>
                 </div>
               )}
 
@@ -221,27 +227,36 @@ export default function CameraEditModal({ camera, onClose }: CameraEditModalProp
             Режим записи
             <select
               value={recordingMode}
-              onChange={(e) => setRecordingMode(e.target.value as RecordingMode)}
+              onChange={(e) =>
+                setRecordingMode(e.target.value as RecordingMode)
+              }
             >
               <option value="continuous">Непрерывная</option>
               <option value="motion">По движению</option>
             </select>
           </label>
 
+          {recordingMode === "motion" && (
+            <p className="form-hint">
+              В архив сохраняются эпизоды движения с предзаписью 5 с; буфер
+              хранит 3 последних сегмента по 5 минут.
+            </p>
+          )}
+
           <div className="switch-row">
             <span className="switch-label">
               <span className="switch-title">Детекция движения (ONVIF)</span>
               <span className="switch-hint">
-                {sourceType === 'onvif'
-                  ? 'События движения и отбор эпизодов в архив'
-                  : 'Доступно только для ONVIF-камер'}
+                {sourceType === "onvif"
+                  ? "События движения и отбор эпизодов в архив"
+                  : "Доступно только для ONVIF-камер"}
               </span>
             </span>
             <label className="switch">
               <input
                 type="checkbox"
                 checked={motionDetection}
-                disabled={sourceType !== 'onvif'}
+                disabled={sourceType !== "onvif"}
                 onChange={(e) => setMotionDetection(e.target.checked)}
               />
               <span className="switch-slider" />
@@ -250,7 +265,7 @@ export default function CameraEditModal({ camera, onClose }: CameraEditModalProp
 
           <div className="modal-actions">
             <button type="submit" disabled={mutation.isPending}>
-              {mutation.isPending ? 'Сохранение...' : 'Сохранить'}
+              {mutation.isPending ? "Сохранение..." : "Сохранить"}
             </button>
             <button
               type="button"
