@@ -236,7 +236,12 @@ export default function MonitorPage() {
                   <>
                     <div className="cell-header">
                       <div className="cell-titles">
-                        <span className="cell-name">{cam.name}</span>
+                        {/* Строка 1: название камеры и индикатор статуса рядом. */}
+                        <span className="cell-name-row">
+                          <span className="cell-name">{cam.name}</span>
+                          <span className={`status-dot status-${cam.status}`} />
+                        </span>
+                        {/* Строка 2: режим записи. */}
                         <span
                           className={[
                             'cell-mode',
@@ -246,7 +251,6 @@ export default function MonitorPage() {
                           {isMotion ? 'по движению' : 'непрерывно'}
                         </span>
                       </div>
-                      <span className={`status-dot status-${cam.status}`} />
                       <button
                         className="cell-clear"
                         title="Освободить ячейку"

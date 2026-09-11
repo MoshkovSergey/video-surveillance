@@ -124,7 +124,7 @@
   color: rgba(255, 255, 255, 0.12);
 }
 
-/* ---------- Шапка ячейки: название + режим записи ---------- */
+/* ---------- Шапка ячейки ---------- */
 
 .cell-header {
   position: absolute;
@@ -139,11 +139,20 @@
   background: linear-gradient(180deg, rgba(5, 6, 15, 0.85), transparent);
 }
 
+/* Колонка из двух строк: (название + индикатор) и режим записи. */
 .cell-titles {
   display: flex;
   flex-direction: column;
   gap: 2px;
   flex: 1;
+  min-width: 0;
+}
+
+/* Строка 1: название камеры и зелёный индикатор статуса рядом, как раньше. */
+.cell-name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   min-width: 0;
 }
 
@@ -157,6 +166,7 @@
   white-space: nowrap;
 }
 
+/* Строка 2: режим записи. */
 .cell-mode {
   font-size: 0.68rem;
   font-weight: 600;
@@ -176,10 +186,6 @@
   color: var(--muted);
 }
 
-.cell-header .status-dot {
-  margin-top: 4px;
-}
-
 .cell-clear {
   margin-top: 2px;
   width: 22px;
@@ -190,6 +196,7 @@
   color: #ffffff;
   cursor: pointer;
   line-height: 1;
+  flex: none;
 }
 
 .cell-clear:hover {
