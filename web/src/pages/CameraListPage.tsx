@@ -1,9 +1,16 @@
+import { useEffect, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { deleteCamera, getCameras } from '../api/client';
 import CameraForm from '../components/CameraForm';
 import { useToast } from '../components/Toast';
-import type { CameraStatus } from '../types/camera';
+import type { Camera, CameraStatus } from '../types/camera';
+
+const statusLabels: Record<CameraStatus, string> = {
+  enabled: 'в сети',
+  disabled: 'отключена',
+  error: 'нет связи',
+};
 
 const getStatusColor = (status: CameraStatus): string => {
   switch (status) {
@@ -25,7 +32,36 @@ export default function CameraListPage() {
   const { data: cameras, isLoading, isError } = useQuery({
     queryKey: ['cameras'],
     queryFn: getCameras,
+    refetchInterval: 10_000, // оперативный контроль состояния камер
   });
+
+  // Отслеживаем смены статуса для уведомлений оператора.
+  const prevStatuses = useRef<Map<string, CameraStatus> | null>(null);
+
+  useEffect(() => {
+    if (!cameras) return;
+
+    const prev = prevStatuses.current;
+    const next = new Map<string, CameraStatus>();
+    for (const cam of cameras) {
+      next.set(cam.id, cam.status);
+    }
+
+    if (prev) {
+      for (const cam of cameras) {
+        const before = prev.get(cam.id);
+        if (before === undefined || before === cam.status) continue;
+
+        if (cam.status === 'error') {
+          notify('error', `Потеряна связь с камерой «${cam.name}»`);
+        } else if (cam.status === 'enabled' && before === 'error') {
+          notify('success', `Камера «${cam.name}» снова в сети`);
+        }
+      }
+    }
+
+    prevStatuses.current = next;
+  }, [cameras, notify]);
 
   const deleteMutation = useMutation({
     mutationFn: deleteCamera,
@@ -68,7 +104,7 @@ export default function CameraListPage() {
           </tr>
         </thead>
         <tbody>
-          {cameras?.map((cam) => (
+          {cameras?.map((cam: Camera) => (
             <tr key={cam.id}>
               <td>{cam.name}</td>
               <td>{cam.location || '—'}</td>
@@ -77,7 +113,7 @@ export default function CameraListPage() {
                   className="status-badge"
                   style={{ backgroundColor: getStatusColor(cam.status) }}
                 >
-                  {cam.status}
+                  {statusLabels[cam.status] ?? cam.status}
                 </span>
               </td>
               <td>

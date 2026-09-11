@@ -5,6 +5,7 @@ import Layout from './components/Layout';
 import CameraListPage from './pages/CameraListPage';
 import CameraViewPage from './pages/CameraViewPage';
 import ArchivePage from './pages/ArchivePage';
+import EventsPage from './pages/EventsPage';
 
 const queryClient = new QueryClient();
 
@@ -18,6 +19,7 @@ function App() {
               <Route path="/" element={<CameraListPage />} />
               <Route path="/cameras/:id/view" element={<CameraViewPage />} />
               <Route path="/archive" element={<ArchivePage />} />
+              <Route path="/events" element={<EventsPage />} />
             </Route>
           </Routes>
         </BrowserRouter>

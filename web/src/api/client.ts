@@ -5,6 +5,7 @@ import type {
   UpdateCameraPayload,
 } from '../types/camera';
 import type { Recording, RecordingsQuery } from '../types/recording';
+import type { EventsQuery, SystemEvent } from '../types/event';
 
 const API_BASE = '/api/v1';
 
@@ -79,4 +80,20 @@ export async function getRecordings(params: RecordingsQuery = {}): Promise<Recor
 
 export function recordingFileUrl(recordingId: string): string {
   return `${API_BASE}/recordings/${recordingId}/file`;
+}
+
+export async function getEvents(params: EventsQuery = {}): Promise<SystemEvent[]> {
+  const search = new URLSearchParams();
+  if (params.camera_id) search.set('camera_id', params.camera_id);
+  if (params.type) search.set('type', params.type);
+  if (params.from) search.set('from', params.from);
+  if (params.to) search.set('to', params.to);
+  if (params.limit) search.set('limit', String(params.limit));
+
+  const qs = search.toString();
+  const res = await fetch(`${API_BASE}/events${qs ? `?${qs}` : ''}`);
+  if (!res.ok) {
+    throw new Error(await parseError(res));
+  }
+  return res.json();
 }

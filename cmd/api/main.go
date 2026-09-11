@@ -17,6 +17,7 @@ import (
 	"gitverse.ru/cataclysm78/video-surveillance/internal/domain"
 	httpapi "gitverse.ru/cataclysm78/video-surveillance/internal/http"
 	"gitverse.ru/cataclysm78/video-surveillance/internal/mediamtx"
+	"gitverse.ru/cataclysm78/video-surveillance/internal/monitor"
 	"gitverse.ru/cataclysm78/video-surveillance/internal/postgres"
 	"gitverse.ru/cataclysm78/video-surveillance/internal/recorder"
 )
@@ -48,6 +49,7 @@ func main() {
 
 	cameraRepo := postgres.NewCameraRepository(pool)
 	recordingRepo := postgres.NewRecordingRepository(pool)
+	eventRepo := postgres.NewEventRepository(pool)
 	media := mediamtx.NewClient(cfg.MediaMTXAPIURL)
 
 	// Регистрируем в MediaMTX все активные камеры из базы данных.
@@ -62,7 +64,11 @@ func main() {
 	)
 	scanner.Start(ctx)
 
-	handler := httpapi.NewHandler(pool, cameraRepo, recordingRepo, media, logger)
+	// Фоновый монитор состояния камер (онлайн/офлайн).
+	mon := monitor.NewMonitor(media, cameraRepo, eventRepo, 10*time.Second, logger)
+	mon.Start(ctx)
+
+	handler := httpapi.NewHandler(pool, cameraRepo, recordingRepo, eventRepo, media, logger)
 
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,

@@ -11,6 +11,7 @@ export default function Layout() {
             Камеры
           </NavLink>
           <NavLink to="/archive">Архив</NavLink>
+          <NavLink to="/events">События</NavLink>
         </nav>
       </header>
       <main>

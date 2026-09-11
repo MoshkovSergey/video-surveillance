@@ -39,7 +39,6 @@ func (r *CameraRepository) Create(ctx context.Context, cam *domain.Camera) error
 	cam.CreatedAt = now
 	cam.UpdatedAt = now
 
-	// Преобразуем map[string]any в JSON bytes для надежной записи в JSONB
 	configBytes, err := json.Marshal(cam.Config)
 	if err != nil {
 		return fmt.Errorf("marshal config: %w", err)
@@ -51,7 +50,7 @@ func (r *CameraRepository) Create(ctx context.Context, cam *domain.Camera) error
 	)
 	if err != nil {
 		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" { // unique_violation
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 			return fmt.Errorf("camera already exists: %w", err)
 		}
 		return fmt.Errorf("insert camera: %w", err)
@@ -86,8 +85,7 @@ func (r *CameraRepository) List(ctx context.Context) ([]domain.Camera, error) {
 	return cameras, nil
 }
 
-// GetByID возвращает камеру по идентификатору.
-// Если камера не найдена, возвращает nil, nil.
+// GetByID возвращает камеру по идентификатору. Если не найдена — nil, nil.
 func (r *CameraRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.Camera, error) {
 	query := `
 		SELECT id, name, rtsp_uri, location, fire_zone_id, status, config, created_at, updated_at
@@ -98,7 +96,7 @@ func (r *CameraRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.C
 	cam, err := scanCamera(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, nil // Not found
+			return nil, nil
 		}
 		return nil, fmt.Errorf("query camera: %w", err)
 	}
@@ -127,7 +125,19 @@ func (r *CameraRepository) Update(ctx context.Context, cam *domain.Camera) error
 		return fmt.Errorf("update camera: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return nil // Not found or no changes
+		return nil
+	}
+	return nil
+}
+
+// SetStatus обновляет только статус камеры.
+func (r *CameraRepository) SetStatus(ctx context.Context, id uuid.UUID, status domain.CameraStatus) error {
+	_, err := r.pool.Exec(ctx,
+		`UPDATE cameras SET status = $1, updated_at = now() WHERE id = $2`,
+		status, id,
+	)
+	if err != nil {
+		return fmt.Errorf("set camera status: %w", err)
 	}
 	return nil
 }
@@ -140,12 +150,12 @@ func (r *CameraRepository) Delete(ctx context.Context, id uuid.UUID) error {
 		return fmt.Errorf("delete camera: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return nil // Not found
+		return nil
 	}
 	return nil
 }
 
-// scanCamera универсальная функция для чтения строки из БД в структуру Camera.
+// scanCamera универсальная функция чтения строки БД в структуру Camera.
 func scanCamera(sc interface{ Scan(dest ...any) error }) (*domain.Camera, error) {
 	var cam domain.Camera
 	var configBytes []byte

@@ -18,6 +18,7 @@ type Handler struct {
 	pool          *pgxpool.Pool
 	cameraRepo    *postgres.CameraRepository
 	recordingRepo *postgres.RecordingRepository
+	eventRepo     *postgres.EventRepository
 	media         *mediamtx.Client
 	logger        *slog.Logger
 }
@@ -27,6 +28,7 @@ func NewHandler(
 	pool *pgxpool.Pool,
 	cameraRepo *postgres.CameraRepository,
 	recordingRepo *postgres.RecordingRepository,
+	eventRepo *postgres.EventRepository,
 	media *mediamtx.Client,
 	logger *slog.Logger,
 ) http.Handler {
@@ -34,6 +36,7 @@ func NewHandler(
 		pool:          pool,
 		cameraRepo:    cameraRepo,
 		recordingRepo: recordingRepo,
+		eventRepo:     eventRepo,
 		media:         media,
 		logger:        logger,
 	}
@@ -55,6 +58,9 @@ func NewHandler(
 	// Recordings API
 	mux.HandleFunc("GET /api/v1/recordings", h.handleListRecordings)
 	mux.HandleFunc("GET /api/v1/recordings/{id}/file", h.handleGetRecordingFile)
+
+	// Events API
+	mux.HandleFunc("GET /api/v1/events", h.handleListEvents)
 
 	return h.recover(h.logRequests(mux))
 }

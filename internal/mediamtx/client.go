@@ -24,9 +24,17 @@ func NewClient(baseURL string) *Client {
 	}
 }
 
+// PathInfo описывает runtime-состояние пути MediaMTX.
+type PathInfo struct {
+	Name  string `json:"name"`
+	Ready bool   `json:"ready"`
+}
+
+type pathsListResponse struct {
+	Items []PathInfo `json:"items"`
+}
+
 // pathConfig описывает конфигурацию пути MediaMTX.
-// record: true включает непрерывную запись сегментов MP4.
-// sourceOnDemand: false держит источник постоянно подключенным (поведение NVR).
 type pathConfig struct {
 	Source                string `json:"source"`
 	SourceOnDemand        *bool  `json:"sourceOnDemand,omitempty"`
@@ -60,7 +68,26 @@ func (c *Client) Ping(ctx context.Context) error {
 	return nil
 }
 
+// ListPaths возвращает runtime-состояние всех путей MediaMTX.
+func (c *Client) ListPaths(ctx context.Context) ([]PathInfo, error) {
+	res, body, err := c.do(ctx, http.MethodGet, "/v3/paths/list", nil)
+	if err != nil {
+		return nil, err
+	}
+	if res.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("mediamtx paths list: status %d, body: %s", res.StatusCode, string(body))
+	}
+
+	var parsed pathsListResponse
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return nil, fmt.Errorf("unmarshal paths list: %w", err)
+	}
+	return parsed.Items, nil
+}
+
 // AddPath регистрирует путь камеры с непрерывной записью.
+// Если путь уже существует, выполняется remove + add:
+// эндпоинт edit отсутствует в MediaMTX v1.21.
 func (c *Client) AddPath(ctx context.Context, name string, sourceRTSP string) error {
 	payload, err := json.Marshal(newPathConfig(sourceRTSP))
 	if err != nil {
@@ -76,29 +103,22 @@ func (c *Client) AddPath(ctx context.Context, name string, sourceRTSP string) er
 		return nil
 	}
 
-	// Путь уже существует — обновляем конфигурацию.
 	if res.StatusCode == http.StatusBadRequest || res.StatusCode == http.StatusConflict {
-		return c.EditPath(ctx, name, sourceRTSP)
+		if err := c.RemovePath(ctx, name); err != nil {
+			return fmt.Errorf("mediamtx remove path before re-add %s: %w", name, err)
+		}
+
+		res, body, err = c.do(ctx, http.MethodPost, "/v3/config/paths/add/"+name, payload)
+		if err != nil {
+			return err
+		}
+		if res.StatusCode == http.StatusOK || res.StatusCode == http.StatusCreated || res.StatusCode == http.StatusNoContent {
+			return nil
+		}
+		return fmt.Errorf("mediamtx re-add path %s: status %d, body: %s", name, res.StatusCode, string(body))
 	}
 
 	return fmt.Errorf("mediamtx add path %s: status %d, body: %s", name, res.StatusCode, string(body))
-}
-
-// EditPath обновляет конфигурацию существующего пути.
-func (c *Client) EditPath(ctx context.Context, name string, sourceRTSP string) error {
-	payload, err := json.Marshal(newPathConfig(sourceRTSP))
-	if err != nil {
-		return fmt.Errorf("marshal path config: %w", err)
-	}
-
-	res, body, err := c.do(ctx, http.MethodPatch, "/v3/config/paths/edit/"+name, payload)
-	if err != nil {
-		return err
-	}
-	if res.StatusCode != http.StatusOK && res.StatusCode != http.StatusNoContent {
-		return fmt.Errorf("mediamtx edit path %s: status %d, body: %s", name, res.StatusCode, string(body))
-	}
-	return nil
 }
 
 // RemovePath удаляет путь. Отсутствие пути не считается ошибкой.

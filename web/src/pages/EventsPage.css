@@ -1,0 +1,21 @@
+.severity-badge {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 4px;
+  color: #ffffff;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.sev-info {
+  background-color: #17a2b8;
+}
+
+.sev-warning {
+  background-color: #ffc107;
+  color: #212529;
+}
+
+.sev-critical {
+  background-color: #dc3545;
+}
