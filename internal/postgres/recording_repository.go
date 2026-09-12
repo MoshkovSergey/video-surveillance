@@ -3,10 +3,12 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"gitverse.ru/cataclysm78/video-surveillance/internal/domain"
@@ -105,6 +107,9 @@ func (r *RecordingRepository) GetByID(ctx context.Context, id uuid.UUID) (*domai
 		&rec.StoragePath, &rec.SizeBytes, &rec.Kept, &rec.CreatedAt,
 	)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("query recording: %w", err)
 	}
 	return &rec, nil
@@ -181,7 +186,7 @@ func (r *RecordingRepository) ListSourceSegments(ctx context.Context, cameraID u
 }
 
 // HasOpenOverlapping сообщает, есть ли ещё записываемый сегмент,
-// пересекающий окно [from, to]: резать его пока нельзя.
+// начавшийся не позже to (для клипа передают момент снимка).
 func (r *RecordingRepository) HasOpenOverlapping(ctx context.Context, cameraID uuid.UUID, from, to time.Time) (bool, error) {
 	query := `
 		SELECT EXISTS(

@@ -25,7 +25,10 @@ type EventMessage struct {
 
 // IsMotionTopic распознаёт темы детектора движения.
 func (m EventMessage) IsMotionTopic() bool {
-	return strings.Contains(m.Topic, "RuleEngine") && strings.Contains(m.Topic, "Motion")
+	t := strings.ToLower(m.Topic)
+	return strings.Contains(t, "motion") ||
+		strings.Contains(t, "cellmotion") ||
+		strings.Contains(t, "motionalarm")
 }
 
 // IsActive возвращает true, если движение активно.
@@ -131,6 +134,8 @@ func Unsubscribe(ctx context.Context, subURL string, creds Credentials) {
 	defer cancel()
 
 	_, _ = callEvents(ctx, subURL, creds, `<tev:Unsubscribe/>`)
+	_, _ = callEvents(ctx, subURL, creds,
+		`<wsnt:Unsubscribe xmlns:wsnt="http://docs.oasis-open.org/wsn/b-2"/>`)
 }
 
 // PullMessages читает очередь событий подписки.
