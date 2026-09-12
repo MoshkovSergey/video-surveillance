@@ -20,12 +20,17 @@ import (
 	"gitverse.ru/cataclysm78/video-surveillance/internal/postgres"
 )
 
-// keepBufferSegments — сколько завершённых сегментов буфера режима
-// «по движению» хранить на диске (3 сегмента по 5 минут = 15 минут).
-const keepBufferSegments = 3
+const (
+	// keepBufferSegments — сколько завершённых сегментов буфера режима
+	// «по движению» хранить на диске (3 сегмента по 5 минут = 15 минут).
+	keepBufferSegments = 3
 
-// clipJobTTL — срок, после которого задача без сегментов помечается failed.
-const clipJobTTL = 2 * time.Hour
+	// clipJobTTL — срок, после которого задача без сегментов помечается failed.
+	clipJobTTL = 2 * time.Hour
+)
+
+// mskZone — московское время (UTC+3, без сезонных переходов) для имён файлов.
+var mskZone = time.FixedZone("MSK", 3*60*60)
 
 // errCameraMissing означает, что камера удалена из базы,
 // а её каталог с записями остался на диске.
@@ -239,6 +244,7 @@ func (s *Scanner) processClipJobs(ctx context.Context) {
 
 // buildClips вырезает по одному клипу из каждого покрывающего сегмента
 // и возвращает относительный путь первого клипа.
+// Имена файлов клипов формируются в московском времени.
 func (s *Scanner) buildClips(ctx context.Context, job domain.ClipJob, segs []domain.Recording) (string, error) {
 	firstClip := ""
 
@@ -276,8 +282,9 @@ func (s *Scanner) buildClips(ctx context.Context, job domain.ClipJob, segs []dom
 		offset := winStart.Sub(segStart)
 		duration := winEnd.Sub(winStart)
 
+		// Имя файла клипа — в московском времени (UTC+3).
 		clipRel := fmt.Sprintf("clips/cam_%s/%s.mp4",
-			job.CameraID, winStart.UTC().Format("2006-01-02_15-04-05"))
+			job.CameraID, winStart.In(mskZone).Format("2006-01-02_15-04-05"))
 		hostClip := filepath.Join(s.relBase, filepath.FromSlash(clipRel))
 
 		if err := os.MkdirAll(filepath.Dir(hostClip), 0o755); err != nil {
@@ -374,7 +381,6 @@ func (s *Scanner) cleanupMotionBuffers(ctx context.Context) {
 		deleted := 0
 		skipped := 0
 		for _, row := range rows[keepBufferSegments:] {
-			// Проверяем, не покрывает ли сегмент какая-то pending-задача клипа.
 			segEnd := *row.EndedAt
 			needed, err := s.jobRepo.HasPendingJobOverlapping(ctx, cam.ID, row.StartedAt, segEnd)
 			if err != nil {
@@ -475,6 +481,7 @@ func (s *Scanner) scanCamera(ctx context.Context, cameraID uuid.UUID, dir string
 			continue
 		}
 
+		// Имена сегментов MediaMTX остаются в UTC: их пишет сам MediaMTX.
 		startedAt, err := time.Parse("2006-01-02_15-04-05", strings.TrimSuffix(e.Name(), ".mp4"))
 		if err != nil {
 			continue

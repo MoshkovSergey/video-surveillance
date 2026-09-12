@@ -22,11 +22,14 @@ const (
 	episodeCooldown = 10 * time.Second
 	// preRoll — предзапись клипа: 5 секунд до триггера.
 	preRoll = 5 * time.Second
-	// postRoll — постзапись клипа: 10 секунд после окончания.
-	postRoll = 10 * time.Second
+	// postRoll — постзапись клипа: 5 секунд после окончания.
+	postRoll = 5 * time.Second
 	// resubscribeAfter — срок жизни PullPoint-подписки.
 	resubscribeAfter = 4 * time.Minute
 )
+
+// mskZone — московское время (UTC+3, без сезонных переходов) для имён файлов.
+var mskZone = time.FixedZone("MSK", 3*60*60)
 
 // Manager управляет воркерами детекции движения по событиям ONVIF.
 type Manager struct {
@@ -140,9 +143,10 @@ func (m *Manager) worker(ctx context.Context, cam domain.Camera) {
 	snapRel := ""
 
 	// startSnapshot асинхронно захватывает кадр живого потока в момент триггера.
+	// Имя файла снимка формируется в московском времени.
 	startSnapshot := func() {
 		rel := fmt.Sprintf("snapshots/cam_%s/%s.jpg",
-			cam.ID, time.Now().UTC().Format("2006-01-02_15-04-05"))
+			cam.ID, time.Now().In(mskZone).Format("2006-01-02_15-04-05"))
 		source := fmt.Sprintf("rtsp://127.0.0.1:8554/cam_%s", cam.ID)
 
 		go func() {
@@ -195,12 +199,14 @@ func (m *Manager) worker(ctx context.Context, cam domain.Camera) {
 			m.logger.Error("motion: failed to create event", "camera_id", cam.ID, "error", err)
 		}
 
+		// Окно клипа: 5 секунд предзаписи и 5 секунд постзаписи.
 		job := &domain.ClipJob{
 			ID:          uuid.New(),
 			CameraID:    cam.ID,
 			WindowStart: episodeStart.Add(-preRoll),
 			WindowEnd:   end.Add(postRoll),
 			Status:      "pending",
+			SnapshotRel: snapshot,
 		}
 		if err := m.jobRepo.Create(ctx, job); err != nil {
 			m.logger.Error("motion: failed to create clip job", "camera_id", cam.ID, "error", err)
@@ -210,6 +216,7 @@ func (m *Manager) worker(ctx context.Context, cam domain.Camera) {
 			"camera_id", cam.ID,
 			"started_at", episodeStart.Format(time.RFC3339),
 			"ended_at", end.Format(time.RFC3339),
+			"clip_window", job.WindowStart.Format(time.RFC3339)+".."+job.WindowEnd.Format(time.RFC3339),
 			"snapshot", snapshot,
 		)
 		episodeStart = time.Time{}

@@ -76,6 +76,11 @@ func NewHandler(
 	mux.HandleFunc("PATCH /api/v1/cameras/{id}", h.requireRoles(h.handleUpdateCamera, domain.RoleAdmin, domain.RoleOperator))
 	mux.HandleFunc("DELETE /api/v1/cameras/{id}", h.requireRoles(h.handleDeleteCamera, domain.RoleAdmin))
 
+	// Живой звук: транскодинг G.711 -> AAC для браузерного просмотра
+	mux.HandleFunc("POST /api/v1/cameras/{id}/audio/start", h.requireAuth(h.handleAudioStart))
+	mux.HandleFunc("POST /api/v1/cameras/{id}/audio/stop", h.requireAuth(h.handleAudioStop))
+	mux.HandleFunc("GET /api/v1/cameras/{id}/audio/status", h.requireAuth(h.handleAudioStatus))
+
 	// Recordings API
 	mux.HandleFunc("GET /api/v1/recordings", h.requireAuth(h.handleListRecordings))
 	mux.HandleFunc("GET /api/v1/recordings/{id}/file", h.requireAuth(h.handleGetRecordingFile))

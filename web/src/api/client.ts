@@ -287,6 +287,32 @@ export async function getCameraStream(cameraId: string): Promise<StreamInfo> {
   return res.json();
 }
 
+// ---------- Live audio (транскодинг G.711 -> AAC) ----------
+
+export async function startCameraAudio(cameraId: string): Promise<void> {
+  const res = await apiFetch(`/cameras/${cameraId}/audio/start`, { method: 'POST' });
+  if (!res.ok) {
+    throw new Error(await parseError(res));
+  }
+}
+
+export async function stopCameraAudio(cameraId: string): Promise<void> {
+  const res = await apiFetch(`/cameras/${cameraId}/audio/stop`, { method: 'POST' });
+  if (!res.ok) {
+    throw new Error(await parseError(res));
+  }
+}
+
+export async function getCameraAudioStatus(
+  cameraId: string,
+): Promise<{ running: boolean; available: boolean }> {
+  const res = await apiFetch(`/cameras/${cameraId}/audio/status`);
+  if (!res.ok) {
+    throw new Error(await parseError(res));
+  }
+  return res.json();
+}
+
 // ---------- Recordings ----------
 
 export async function getRecordings(params: RecordingsQuery = {}): Promise<Recording[]> {
