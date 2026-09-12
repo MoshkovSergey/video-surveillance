@@ -14,6 +14,7 @@ import (
 
 	"github.com/joho/godotenv"
 
+	"gitverse.ru/cataclysm78/video-surveillance/internal/audio"
 	"gitverse.ru/cataclysm78/video-surveillance/internal/auth"
 	"gitverse.ru/cataclysm78/video-surveillance/internal/clipper"
 	"gitverse.ru/cataclysm78/video-surveillance/internal/config"
@@ -123,6 +124,12 @@ func run(ctx context.Context) error {
 	// Менеджер детекции движения по событиям ONVIF.
 	motionMgr := motion.NewManager(cameraRepo, eventRepo, clipJobRepo, clipper.New(cfg.StoragePath), logger)
 	motionMgr.Start(ctx)
+
+	// Транскодер живого звука G.711 -> AAC для просмотра в браузере.
+	// Сайкары поднимаются по запросу из интерфейса (кнопка «Включить звук»).
+	audioMgr := audio.NewManager(logger)
+	audio.SetDefault(audioMgr)
+	_ = audioMgr
 
 	// HTTP API и встроенный веб-интерфейс.
 	absStorage, err := filepath.Abs(cfg.StoragePath)

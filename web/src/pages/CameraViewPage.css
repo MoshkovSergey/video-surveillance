@@ -77,3 +77,70 @@
   font-size: 0.82rem;
   line-height: 1.5;
 }
+
+/* ---------- Живой просмотр: видео + скрытый звук ---------- */
+
+.view-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.view-title {
+  margin: 0;
+  flex: 1;
+  background: linear-gradient(135deg, #ffffff 0%, #67e8f9 60%, #a78bfa 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.view-video-box {
+  position: relative;
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: #000000;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.45);
+}
+
+.view-video {
+  display: block;
+  width: 100%;
+  max-height: 72vh;
+  background: #000000;
+}
+
+.view-audio-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.btn-sound-on {
+  padding: 10px 18px;
+  border-radius: 12px;
+  border: 1px solid rgba(74, 222, 128, 0.6);
+  background: rgba(74, 222, 128, 0.12);
+  color: #86efac;
+  font-family: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 0 14px rgba(74, 222, 128, 0.35);
+  transition: background 0.2s, box-shadow 0.2s;
+}
+
+.btn-sound-on:hover {
+  background: rgba(74, 222, 128, 0.2);
+}
+
+.view-hint {
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
