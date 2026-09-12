@@ -61,17 +61,19 @@ func (r *RecordingRepository) InsertKept(ctx context.Context, rec *domain.Record
 }
 
 // List возвращает сегменты архива с фильтрами, новые первыми.
-func (r *RecordingRepository) List(ctx context.Context, cameraID *uuid.UUID, from, to *time.Time) ([]domain.Recording, error) {
+// kept: nil — все записи; true — только клипы; false — только буфер.
+func (r *RecordingRepository) List(ctx context.Context, cameraID *uuid.UUID, from, to *time.Time, kept *bool) ([]domain.Recording, error) {
 	query := `
 		SELECT id, camera_id, started_at, ended_at, storage_path, size_bytes, kept, created_at
 		FROM recordings
 		WHERE ($1::uuid IS NULL OR camera_id = $1)
 		  AND ($2::timestamptz IS NULL OR started_at >= $2)
 		  AND ($3::timestamptz IS NULL OR started_at <= $3)
+		  AND ($4::bool IS NULL OR kept = $4)
 		ORDER BY started_at DESC
 		LIMIT 500
 	`
-	rows, err := r.pool.Query(ctx, query, cameraID, from, to)
+	rows, err := r.pool.Query(ctx, query, cameraID, from, to, kept)
 	if err != nil {
 		return nil, fmt.Errorf("query recordings: %w", err)
 	}
