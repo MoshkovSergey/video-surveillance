@@ -13,6 +13,8 @@ import (
 )
 
 // EventRepository реализует работу с таблицей events.
+// Колонка type имеет ENUM-тип event_type, поэтому во всех запросах
+// используется приведение type::text.
 type EventRepository struct {
 	pool *pgxpool.Pool
 }
@@ -22,7 +24,7 @@ func NewEventRepository(pool *pgxpool.Pool) *EventRepository {
 	return &EventRepository{pool: pool}
 }
 
-// Create сохраняет событие.
+// Create сохраняет событие журнала.
 func (r *EventRepository) Create(ctx context.Context, ev *domain.Event) error {
 	if ev.ID == uuid.Nil {
 		ev.ID = uuid.New()
@@ -37,11 +39,11 @@ func (r *EventRepository) Create(ctx context.Context, ev *domain.Event) error {
 	}
 
 	query := `
-		INSERT INTO events (id, camera_id, type, severity, occurred_at, payload)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO events (id, camera_id, type, payload, occurred_at)
+		VALUES ($1, $2, $3, $4, $5)
 	`
 	_, err = r.pool.Exec(ctx, query,
-		ev.ID, ev.CameraID, ev.Type, ev.Severity, ev.OccurredAt, payload,
+		ev.ID, ev.CameraID, string(ev.Type), payload, ev.OccurredAt,
 	)
 	if err != nil {
 		return fmt.Errorf("insert event: %w", err)
@@ -49,28 +51,38 @@ func (r *EventRepository) Create(ctx context.Context, ev *domain.Event) error {
 	return nil
 }
 
-// List возвращает события с фильтрами, новые первыми.
-// Пустые строковые фильтры нормализуются в NULL:
-// в SQL пустая строка не равна NULL и иначе фильтр отбросил бы все строки.
-// Колонка type имеет enum-тип event_type, поэтому сравнение через type::text.
-func (r *EventRepository) List(ctx context.Context, cameraID *uuid.UUID, typ *domain.EventType, from, to *time.Time, limit, offset int) ([]domain.Event, error) {
+// List возвращает события с фильтрами и пагинацией, новые первыми.
+func (r *EventRepository) List(
+	ctx context.Context,
+	cameraID *uuid.UUID,
+	typ *domain.EventType,
+	from, to *time.Time,
+	limit, offset int,
+) ([]domain.Event, error) {
 	if limit <= 0 {
-		limit = 200
+		limit = 20
 	}
 	if offset < 0 {
 		offset = 0
 	}
+
+	var typeStr *string
+	if typ != nil {
+		s := string(*typ)
+		typeStr = &s
+	}
+
 	query := `
-		SELECT id, camera_id, type, payload, occurred_at
+		SELECT id, camera_id, type::text, payload, occurred_at
 		FROM events
 		WHERE ($1::uuid IS NULL OR camera_id = $1)
-		  AND ($2::text IS NULL OR type = $2)
+		  AND ($2::text IS NULL OR type::text = $2)
 		  AND ($3::timestamptz IS NULL OR occurred_at >= $3)
 		  AND ($4::timestamptz IS NULL OR occurred_at <= $4)
 		ORDER BY occurred_at DESC
 		LIMIT $5 OFFSET $6
 	`
-	rows, err := r.pool.Query(ctx, query, cameraID, typ, from, to, limit, offset)
+	rows, err := r.pool.Query(ctx, query, cameraID, typeStr, from, to, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("query events: %w", err)
 	}
@@ -79,22 +91,15 @@ func (r *EventRepository) List(ctx context.Context, cameraID *uuid.UUID, typ *do
 	var events []domain.Event
 	for rows.Next() {
 		var ev domain.Event
-		var payloadBytes []byte
-
-		if err := rows.Scan(
-			&ev.ID, &ev.CameraID, &ev.Type, &ev.Severity,
-			&ev.OccurredAt, &payloadBytes, &ev.CreatedAt,
-		); err != nil {
+		var payload []byte
+		var typeText string
+		if err := rows.Scan(&ev.ID, &ev.CameraID, &typeText, &payload, &ev.OccurredAt); err != nil {
 			return nil, fmt.Errorf("scan event: %w", err)
 		}
-
-		ev.Payload = map[string]any{}
-		if payloadBytes != nil {
-			if err := json.Unmarshal(payloadBytes, &ev.Payload); err != nil {
-				return nil, fmt.Errorf("unmarshal event payload: %w", err)
-			}
+		ev.Type = domain.EventType(typeText)
+		if len(payload) > 0 {
+			_ = json.Unmarshal(payload, &ev.Payload)
 		}
-
 		events = append(events, ev)
 	}
 	if err := rows.Err(); err != nil {
@@ -103,13 +108,18 @@ func (r *EventRepository) List(ctx context.Context, cameraID *uuid.UUID, typ *do
 	return events, nil
 }
 
-// ListSince возвращает события с occurred_at >= since, старые первыми, с лимитом.
+// ListSince возвращает события строго позже since, старые первыми
+// (для отправителя уведомлений).
 func (r *EventRepository) ListSince(ctx context.Context, since time.Time, limit int) ([]domain.Event, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+
 	query := `
-		SELECT id, camera_id, type, severity, payload, occurred_at
+		SELECT id, camera_id, type::text, payload, occurred_at
 		FROM events
-		WHERE occurred_at >= $1
-		ORDER BY occurred_at
+		WHERE occurred_at > $1
+		ORDER BY occurred_at ASC
 		LIMIT $2
 	`
 	rows, err := r.pool.Query(ctx, query, since, limit)
@@ -121,16 +131,14 @@ func (r *EventRepository) ListSince(ctx context.Context, since time.Time, limit 
 	var events []domain.Event
 	for rows.Next() {
 		var ev domain.Event
-		var cameraID *uuid.UUID
-		var payloadBytes []byte
-		if err := rows.Scan(&ev.ID, &cameraID, &ev.Type, &ev.Severity, &payloadBytes, &ev.OccurredAt); err != nil {
+		var payload []byte
+		var typeText string
+		if err := rows.Scan(&ev.ID, &ev.CameraID, &typeText, &payload, &ev.OccurredAt); err != nil {
 			return nil, fmt.Errorf("scan event: %w", err)
 		}
-		ev.CameraID = cameraID
-		if payloadBytes != nil {
-			if err := json.Unmarshal(payloadBytes, &ev.Payload); err != nil {
-				return nil, fmt.Errorf("unmarshal event payload: %w", err)
-			}
+		ev.Type = domain.EventType(typeText)
+		if len(payload) > 0 {
+			_ = json.Unmarshal(payload, &ev.Payload)
 		}
 		events = append(events, ev)
 	}
@@ -144,9 +152,9 @@ func (r *EventRepository) ListSince(ctx context.Context, since time.Time, limit 
 // по последним событиям camera_online / camera_offline.
 func (r *EventRepository) LatestCameraStates(ctx context.Context) (map[uuid.UUID]bool, error) {
 	query := `
-		SELECT DISTINCT ON (camera_id) camera_id, type
+		SELECT DISTINCT ON (camera_id) camera_id, type::text
 		FROM events
-		WHERE type IN ('camera_online', 'camera_offline')
+		WHERE type::text IN ('camera_online', 'camera_offline')
 		  AND camera_id IS NOT NULL
 		ORDER BY camera_id, occurred_at DESC
 	`
@@ -159,11 +167,11 @@ func (r *EventRepository) LatestCameraStates(ctx context.Context) (map[uuid.UUID
 	states := make(map[uuid.UUID]bool)
 	for rows.Next() {
 		var cameraID uuid.UUID
-		var typ domain.EventType
-		if err := rows.Scan(&cameraID, &typ); err != nil {
+		var typeText string
+		if err := rows.Scan(&cameraID, &typeText); err != nil {
 			return nil, fmt.Errorf("scan camera state: %w", err)
 		}
-		states[cameraID] = typ == domain.EventCameraOnline
+		states[cameraID] = typeText == string(domain.EventCameraOnline)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate camera states: %w", err)

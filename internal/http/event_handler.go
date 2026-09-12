@@ -10,18 +10,7 @@ import (
 	"gitverse.ru/cataclysm78/video-surveillance/internal/domain"
 )
 
-// allowedEventTypes — белый список допустимых значений фильтра type.
-// var allowedEventTypes = map[string]struct{}{
-// 	string(domain.EventMotion):         {},
-// 	string(domain.EventCameraOnline):   {},
-// 	string(domain.EventCameraOffline):  {},
-// 	string(domain.EventFireAlarm):      {},
-// 	string(domain.EventSmokeDetection): {},
-// 	string(domain.EventManualAlarm):    {},
-// 	string(domain.EventRecordingError): {},
-// }
-
-// handleListEvents возвращает журнал событий с фильтрами.
+// handleListEvents возвращает события журнала с фильтрами и пагинацией.
 func (h *Handler) handleListEvents(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 
@@ -76,6 +65,7 @@ func (h *Handler) handleListEvents(w http.ResponseWriter, r *http.Request) {
 	events, err := h.eventRepo.List(r.Context(), cameraID, typ, from, to, limit, offset)
 	if err != nil {
 		h.logger.Error("failed to list events", "error", err)
+		// Временно возвращаем точную причину для диагностики.
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
 		return
 	}
