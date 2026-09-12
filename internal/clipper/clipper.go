@@ -7,41 +7,30 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 )
 
 const (
-	// cutTimeout — предел кадрирования (все стадии).
-	cutTimeout = 300 * time.Second
-	// snapshotTimeout — предел захвата одного кадра.
-	snapshotTimeout = 15 * time.Second
-	// minClipBytes — минимальный размер корректного клипа.
-	minClipBytes = 10 * 1024
-	// anchorScanFPS — частота SSIM-скана при поиске кадра-якоря.
-	anchorScanFPS = 2.0
-	// anchorSearchBack / anchorSearchFwd — окно поиска якоря вокруг номинала.
-	anchorSearchBack = 15 * time.Second
-	anchorSearchFwd  = 105 * time.Second
-	// anchorMinSSIM — порог доверия к найденному якорю.
-	anchorMinSSIM = 0.30
+	cutTimeout      = 300 * time.Second
+	snapshotTimeout = 20 * time.Second
+	minClipBytes    = 10 * 1024
 )
 
-// Clipper вырезает точные фрагменты из сегментов записи и захватывает кадры.
-// Режимы работы:
-//   - локальный: исполняемый файл FFmpeg из переменной FFMPEG_PATH;
-//   - docker: образ CLIPPER_IMAGE (по умолчанию jrottenberg/ffmpeg:latest).
-//
-// Привязка ко времени: содержимое сегмента начинается с первого ключевого
-// кадра после переключения, поэтому шкала файла может отставать от имени
-// сегмента на величину до IDR-интервала камеры. CutAnchored устраняет это:
-// кадр-якорь (снимок триггера) находится в файле через SSIM, и рез ведётся
-// относительно найденной точки.
+var (
+	reDuration = regexp.MustCompile(`Duration: (\d+):(\d+):(\d+(?:\.\d+)?)`)
+	reStart    = regexp.MustCompile(`start: (-?\d+(?:\.\d+)?)`)
+)
+
+// Clipper вырезает фрагменты из сегментов записи и захватывает кадры.
+// Режимы: локальный FFMPEG_PATH или docker CLIPPER_IMAGE.
 type Clipper struct {
 	storageRoot string
 	image       string
 	ffmpegPath  string
+	ffprobePath string
 	logger      *slog.Logger
 }
 
@@ -59,6 +48,17 @@ func New(storagePath string) *Clipper {
 		}
 	}
 
+	ffprobe := ""
+	if ffmpeg != "" {
+		candidate := filepath.Join(filepath.Dir(ffmpeg), "ffprobe.exe")
+		if _, err := os.Stat(candidate); err != nil {
+			candidate = filepath.Join(filepath.Dir(ffmpeg), "ffprobe")
+		}
+		if _, err := os.Stat(candidate); err == nil {
+			ffprobe = candidate
+		}
+	}
+
 	abs, err := filepath.Abs(storagePath)
 	if err != nil {
 		abs = storagePath
@@ -68,110 +68,62 @@ func New(storagePath string) *Clipper {
 		storageRoot: abs,
 		image:       image,
 		ffmpegPath:  ffmpeg,
+		ffprobePath: ffprobe,
 		logger:      slog.Default(),
 	}
 }
 
-// Cut вырезает фрагмент [offset, offset+duration] без привязки (fallback).
-func (c *Clipper) Cut(ctx context.Context, segRel string, offset, duration time.Duration, clipRel string) error {
-	return c.cut(ctx, segRel, offset, duration, clipRel, "", 0)
+// ProbeInfo — таймлайн медиафайла.
+// VideoDuration важнее FormatDuration: у MediaMTX аудио часто длиннее видео
+// (тишина до первого keyframe), и смещение по format duration сдвигает клип мимо движения.
+type ProbeInfo struct {
+	Start          time.Duration
+	FormatDuration time.Duration
+	VideoDuration  time.Duration
 }
 
-// CutAnchored вырезает фрагмент длительностью duration, привязывая начало
-// к кадру-якорю: снимок тригера snapRel ищется в сегменте через SSIM,
-// начало клипа = matchTime - preRoll. nominalOffset — номинальная оценка
-// (центр окна поиска).
-func (c *Clipper) CutAnchored(
-	ctx context.Context,
-	segRel, snapRel string,
-	preRoll, duration, nominalOffset time.Duration,
-	clipRel string,
-) error {
-	matchTime, ssim, err := c.findAnchor(ctx, segRel, snapRel, nominalOffset)
-	if err != nil || ssim < anchorMinSSIM {
-		c.logger.Warn("clip anchor not found, falling back to nominal offset",
-			"segment", segRel,
-			"nominal_offset_sec", fmt.Sprintf("%.3f", nominalOffset.Seconds()),
-			"ssim", ssim,
-			"error", err,
-		)
-		return c.cut(ctx, segRel, nominalOffset, duration, clipRel, "", 0)
+// ContentDuration — длительность именно видео (для привязки к кадрам).
+func (p ProbeInfo) ContentDuration() time.Duration {
+	if p.VideoDuration > time.Second {
+		return p.VideoDuration
 	}
+	return p.FormatDuration
+}
 
-	offset := matchTime - preRoll
+// Probe возвращает таймлайн файла на хосте.
+func (c *Clipper) Probe(ctx context.Context, hostPath string) (ProbeInfo, error) {
+	if info, err := c.probeStreams(ctx, hostPath); err == nil && info.ContentDuration() > time.Second {
+		return info, nil
+	}
+	return c.probeFFmpeg(ctx, hostPath)
+}
+
+// Duration — длительность видео-содержимого.
+func (c *Clipper) Duration(ctx context.Context, hostPath string) (time.Duration, error) {
+	p, err := c.Probe(ctx, hostPath)
+	return p.ContentDuration(), err
+}
+
+// Cut вырезает [offset, offset+duration] от начала видео-содержимого.
+func (c *Clipper) Cut(ctx context.Context, segRel string, offset, duration time.Duration, clipRel string) error {
 	if offset < 0 {
 		offset = 0
 	}
-
-	c.logger.Info("clip anchor matched",
-		"segment", segRel,
-		"snapshot", snapRel,
-		"match_time_sec", fmt.Sprintf("%.3f", matchTime.Seconds()),
-		"ssim", fmt.Sprintf("%.4f", ssim),
-		"final_offset_sec", fmt.Sprintf("%.3f", offset.Seconds()),
-	)
-
-	return c.cut(ctx, segRel, offset, duration, clipRel, snapRel, matchTime)
-}
-
-// findAnchor ищет в сегменте кадр, максимально совпадающий со снимком.
-// Возвращает время кадра внутри файла и значение SSIM.
-func (c *Clipper) findAnchor(ctx context.Context, segRel, snapRel string, nominalOffset time.Duration) (time.Duration, float64, error) {
-	ctx, cancel := context.WithTimeout(ctx, cutTimeout)
-	defer cancel()
-
-	start := nominalOffset - anchorSearchBack
-	if start < 0 {
-		start = 0
-	}
-	scanLen := anchorSearchBack + anchorSearchFwd
-
-	in := "/data/" + segRel
-	snap := "/data/" + snapRel
-	if c.ffmpegPath != "" {
-		in = filepath.Join(c.storageRoot, filepath.FromSlash(segRel))
-		snap = filepath.Join(c.storageRoot, filepath.FromSlash(snapRel))
+	if duration <= 0 {
+		return fmt.Errorf("ffmpeg cut: non-positive duration")
 	}
 
-	filter := fmt.Sprintf(
-		"[0:v]fps=%g,format=yuv420p[a];[1:v]format=yuv420p[b];[a][b]ssim=stats_file=-",
-		anchorScanFPS,
-	)
-
-	args := c.execArgs(
-		"-ss", fmt.Sprintf("%.3f", start.Seconds()),
-		"-t", fmt.Sprintf("%.3f", scanLen.Seconds()),
-		"-i", in,
-		"-loop", "1", "-i", snap,
-		"-filter_complex", filter,
-		"-t", fmt.Sprintf("%.3f", scanLen.Seconds()),
-		"-f", "null", "-",
-	)
-
-	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return 0, 0, fmt.Errorf("ffmpeg ssim scan: %w: %s", err, tail(out))
-	}
-
-	frame, val := parseSSIMStats(string(out))
-	if frame < 0 {
-		return 0, 0, fmt.Errorf("no ssim stats parsed")
-	}
-
-	matchTime := start + time.Duration(float64(frame)/anchorScanFPS*float64(time.Second))
-	return matchTime, val, nil
-}
-
-// cut выполняет двухстадийный рез: нормализация fMP4 -> прогрессивный MP4,
-// затем точная вырезка окна.
-func (c *Clipper) cut(ctx context.Context, segRel string, offset, duration time.Duration, clipRel, snapRel string, matchTime time.Duration) error {
 	c.logger.Info("clip cut started",
 		"segment", segRel,
 		"offset_sec", fmt.Sprintf("%.3f", offset.Seconds()),
 		"duration_sec", fmt.Sprintf("%.3f", duration.Seconds()),
 		"clip", clipRel,
 	)
+
+	hostOut := filepath.Join(c.storageRoot, filepath.FromSlash(clipRel))
+	if err := os.MkdirAll(filepath.Dir(hostOut), 0o755); err != nil {
+		return err
+	}
 
 	var err error
 	if c.ffmpegPath != "" {
@@ -183,7 +135,6 @@ func (c *Clipper) cut(ctx context.Context, segRel string, offset, duration time.
 		return err
 	}
 
-	hostOut := filepath.Join(c.storageRoot, filepath.FromSlash(clipRel))
 	fi, statErr := os.Stat(hostOut)
 	if statErr != nil || fi.Size() < minClipBytes {
 		return fmt.Errorf("ffmpeg cut: output missing or too small: %s", hostOut)
@@ -193,42 +144,59 @@ func (c *Clipper) cut(ctx context.Context, segRel string, offset, duration time.
 	return nil
 }
 
-func normalizeArgs(in, norm string) []string {
-	return []string{
-		"-y",
-		"-i", in,
-		"-c", "copy",
-		"-movflags", "+faststart",
-		norm,
-	}
-}
+// cutArgs — по https://ffmpeg.org/ffmpeg.html:
+// -ss до -i при транскодинге + accurate_seek (default) = быстрый и точный seek.
+func cutArgs(in, out string, offset, duration time.Duration) []string {
+	ss := fmt.Sprintf("%.3f", offset.Seconds())
+	dd := fmt.Sprintf("%.3f", duration.Seconds())
 
-func cutFromNormArgs(norm, out string, offset, duration time.Duration) []string {
 	return []string{
 		"-y",
-		"-ss", fmt.Sprintf("%.3f", offset.Seconds()),
-		"-i", norm,
-		"-t", fmt.Sprintf("%.3f", duration.Seconds()),
-		"-map", "0:v:0", "-map", "0:a:0?",
+		"-ss", ss,
+		"-i", in,
+		"-t", dd,
+		"-map", "0:v:0",
+		"-map", "0:a:0?",
+		"-vf", "setpts=PTS-STARTPTS",
+		"-af", "asetpts=PTS-STARTPTS",
 		"-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
 		"-pix_fmt", "yuv420p",
 		"-c:a", "aac", "-ar", "48000", "-ac", "1", "-b:a", "64k",
+		"-shortest",
 		"-avoid_negative_ts", "make_zero",
 		"-movflags", "+faststart",
 		out,
 	}
 }
 
-// execArgs собирает команду с учётом режима (локальный ffmpeg или docker).
-func (c *Clipper) execArgs(args ...string) []string {
-	if c.ffmpegPath != "" {
-		return append([]string{c.ffmpegPath}, args...)
+func frameArgs(in, out string, offset time.Duration) []string {
+	args := []string{"-y"}
+	if offset > 0 {
+		args = append(args, "-ss", fmt.Sprintf("%.3f", offset.Seconds()))
 	}
-	return append([]string{
-		"docker", "run", "--rm",
-		"-v", c.storageRoot + ":/data",
-		c.image,
-	}, args...)
+	args = append(args,
+		"-i", in,
+		"-frames:v", "1",
+		"-update", "1",
+		"-q:v", "2",
+		out,
+	)
+	return args
+}
+
+func (c *Clipper) dockerVolume() string {
+	return filepath.ToSlash(c.storageRoot) + ":/data"
+}
+
+func (c *Clipper) runDocker(ctx context.Context, entrypoint string, args ...string) ([]byte, error) {
+	full := []string{"run", "--rm", "-v", c.dockerVolume()}
+	if entrypoint != "" {
+		full = append(full, "--entrypoint", entrypoint)
+	}
+	full = append(full, c.image)
+	full = append(full, args...)
+	cmd := exec.CommandContext(ctx, "docker", full...)
+	return cmd.CombinedOutput()
 }
 
 func (c *Clipper) cutLocal(ctx context.Context, segRel string, offset, duration time.Duration, clipRel string) error {
@@ -237,16 +205,9 @@ func (c *Clipper) cutLocal(ctx context.Context, segRel string, offset, duration 
 
 	in := filepath.Join(c.storageRoot, filepath.FromSlash(segRel))
 	out := filepath.Join(c.storageRoot, filepath.FromSlash(clipRel))
-	norm := out + ".norm.mp4"
-	defer os.Remove(norm)
 
-	cmdNorm := exec.CommandContext(ctx, c.ffmpegPath, normalizeArgs(in, norm)...)
-	if o, err := cmdNorm.CombinedOutput(); err != nil {
-		return fmt.Errorf("ffmpeg normalize: %w: %s", err, tail(o))
-	}
-
-	cmdCut := exec.CommandContext(ctx, c.ffmpegPath, cutFromNormArgs(norm, out, offset, duration)...)
-	if o, err := cmdCut.CombinedOutput(); err != nil {
+	cmd := exec.CommandContext(ctx, c.ffmpegPath, cutArgs(in, out, offset, duration)...)
+	if o, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("ffmpeg cut: %w: %s", err, tail(o))
 	}
 	return nil
@@ -258,56 +219,210 @@ func (c *Clipper) cutDocker(ctx context.Context, segRel string, offset, duration
 
 	in := "/data/" + segRel
 	out := "/data/" + clipRel
-	norm := out + ".norm.mp4"
-	defer os.Remove(filepath.Join(c.storageRoot, filepath.FromSlash(clipRel)+".norm.mp4"))
 
-	run := func(args ...string) error {
-		cmd := exec.CommandContext(ctx, c.execArgs(args...)[0], c.execArgs(args...)[1:]...)
-		o, err := cmd.CombinedOutput()
-		if err != nil {
-			return fmt.Errorf("%w: %s", err, tail(o))
-		}
-		return nil
-	}
-
-	if err := run(normalizeArgs(in, norm)...); err != nil {
-		return fmt.Errorf("ffmpeg normalize: %w", err)
-	}
-	if err := run(cutFromNormArgs(norm, out, offset, duration)...); err != nil {
-		return fmt.Errorf("ffmpeg cut: %w", err)
+	if o, err := c.runDocker(ctx, "", cutArgs(in, out, offset, duration)...); err != nil {
+		return fmt.Errorf("ffmpeg cut: %w: %s", err, tail(o))
 	}
 	return nil
 }
 
-// parseSSIMStats извлекает номер кадра с максимальным значением All.
-// Формат строки: n:123 Y:0.98 U:0.99 V:0.99 All:0.98765 (12.345)
-func parseSSIMStats(out string) (int, float64) {
-	bestFrame, bestVal := -1, 0.0
+// ExtractFrame сохраняет кадр из segRel на смещении offset.
+func (c *Clipper) ExtractFrame(ctx context.Context, segRel string, offset time.Duration, frameRel string) error {
+	if offset < 0 {
+		offset = 0
+	}
 
-	for _, line := range strings.Split(out, "\n") {
-		if !strings.HasPrefix(line, "n:") {
-			continue
+	ctx, cancel := context.WithTimeout(ctx, snapshotTimeout)
+	defer cancel()
+
+	hostOut := filepath.Join(c.storageRoot, filepath.FromSlash(frameRel))
+	if err := os.MkdirAll(filepath.Dir(hostOut), 0o755); err != nil {
+		return err
+	}
+
+	if c.ffmpegPath != "" {
+		in := filepath.Join(c.storageRoot, filepath.FromSlash(segRel))
+		cmd := exec.CommandContext(ctx, c.ffmpegPath, frameArgs(in, hostOut, offset)...)
+		if o, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("ffmpeg frame: %w: %s", err, tail(o))
 		}
-		fields := strings.Fields(line)
-		var n int
-		var all float64
-		for _, f := range fields {
-			if strings.HasPrefix(f, "n:") {
-				n, _ = strconv.Atoi(strings.TrimPrefix(f, "n:"))
-			}
-			if strings.HasPrefix(f, "All:") {
-				all, _ = strconv.ParseFloat(strings.TrimPrefix(f, "All:"), 64)
-			}
-		}
-		if all > bestVal {
-			bestVal, bestFrame = all, n
+	} else {
+		in := "/data/" + segRel
+		out := "/data/" + frameRel
+		if o, err := c.runDocker(ctx, "", frameArgs(in, out, offset)...); err != nil {
+			return fmt.Errorf("ffmpeg frame: %w: %s", err, tail(o))
 		}
 	}
-	return bestFrame, bestVal
+
+	fi, err := os.Stat(hostOut)
+	if err != nil || fi.Size() < 1024 {
+		return fmt.Errorf("ffmpeg frame: output missing or too small: %s", hostOut)
+	}
+	return nil
 }
 
-// Snapshot захватывает один кадр из потока sourceURL и сохраняет
-// в rel (путь относительно storageRoot, в slash-формате).
+func (c *Clipper) probeStreams(ctx context.Context, hostPath string) (ProbeInfo, error) {
+	videoDur, err := c.probeDuration(ctx, hostPath, true)
+	if err != nil {
+		return ProbeInfo{}, err
+	}
+	formatDur, ferr := c.probeDuration(ctx, hostPath, false)
+	if ferr != nil || formatDur < time.Second {
+		formatDur = videoDur
+	}
+	return ProbeInfo{
+		FormatDuration: formatDur,
+		VideoDuration:  videoDur,
+	}, nil
+}
+
+// probeDuration: videoOnly=true → длительность первого видео-потока;
+// иначе — format duration (часто = аудио у MediaMTX).
+func (c *Clipper) probeDuration(ctx context.Context, hostPath string, videoOnly bool) (time.Duration, error) {
+	abs, err := c.resolveHost(hostPath)
+	if err != nil {
+		return 0, err
+	}
+
+	var args []string
+	if videoOnly {
+		args = []string{
+			"-v", "error",
+			"-select_streams", "v:0",
+			"-show_entries", "stream=duration",
+			"-of", "default=noprint_wrappers=1:nokey=1",
+		}
+	} else {
+		args = []string{
+			"-v", "error",
+			"-show_entries", "format=duration",
+			"-of", "default=noprint_wrappers=1:nokey=1",
+		}
+	}
+
+	var out []byte
+	if c.ffprobePath != "" {
+		cmd := exec.CommandContext(ctx, c.ffprobePath, append(args, abs)...)
+		out, err = cmd.CombinedOutput()
+	} else {
+		rel, relErr := c.relUnderStorage(abs)
+		if relErr != nil {
+			return 0, relErr
+		}
+		out, err = c.runDocker(ctx, "ffprobe", append(args, "/data/"+rel)...)
+	}
+	if err != nil {
+		return 0, fmt.Errorf("ffprobe: %w: %s", err, tail(out))
+	}
+
+	sec, err := strconv.ParseFloat(strings.TrimSpace(string(out)), 64)
+	if err != nil || sec <= 0 {
+		return 0, fmt.Errorf("ffprobe: bad duration %q", strings.TrimSpace(string(out)))
+	}
+	return time.Duration(sec * float64(time.Second)), nil
+}
+
+func (c *Clipper) probeFFmpeg(ctx context.Context, hostPath string) (ProbeInfo, error) {
+	abs, err := c.resolveHost(hostPath)
+	if err != nil {
+		return ProbeInfo{}, err
+	}
+
+	var out []byte
+	if c.ffmpegPath != "" {
+		cmd := exec.CommandContext(ctx, c.ffmpegPath, "-hide_banner", "-i", abs)
+		out, _ = cmd.CombinedOutput()
+	} else {
+		rel, relErr := c.relUnderStorage(abs)
+		if relErr != nil {
+			return ProbeInfo{}, relErr
+		}
+		out, _ = c.runDocker(ctx, "", "-hide_banner", "-i", "/data/"+rel)
+	}
+
+	start, dur, ok := parseFFmpegProbe(out)
+	if !ok {
+		return ProbeInfo{}, fmt.Errorf("ffmpeg probe: cannot parse duration: %s", tail(out))
+	}
+	return ProbeInfo{Start: start, FormatDuration: dur, VideoDuration: dur}, nil
+}
+
+// resolveHost приводит путь к абсолютному на хосте.
+func (c *Clipper) resolveHost(hostPath string) (string, error) {
+	p := filepath.Clean(filepath.FromSlash(hostPath))
+	if filepath.IsAbs(p) {
+		return p, nil
+	}
+	// Относительный путь из БД: "storage/recordings/..." или "recordings/..."
+	joined := filepath.Join(c.storageRoot, p)
+	if _, err := os.Stat(joined); err == nil {
+		return joined, nil
+	}
+	// Если префикс уже содержит имя каталога storage — срезаем и пробуем снова.
+	base := filepath.Base(c.storageRoot)
+	slash := filepath.ToSlash(p)
+	if strings.HasPrefix(slash, base+"/") {
+		joined = filepath.Join(c.storageRoot, filepath.FromSlash(strings.TrimPrefix(slash, base+"/")))
+		if _, err := os.Stat(joined); err == nil {
+			return joined, nil
+		}
+	}
+	// Как есть относительно CWD.
+	if abs, err := filepath.Abs(p); err == nil {
+		if _, err := os.Stat(abs); err == nil {
+			return abs, nil
+		}
+	}
+	return "", fmt.Errorf("resolve host path: not found: %s", hostPath)
+}
+
+// relUnderStorage — путь относительно storageRoot в slash-формате для Docker /data.
+func (c *Clipper) relUnderStorage(absHost string) (string, error) {
+	absHost = filepath.Clean(absHost)
+	root := filepath.Clean(c.storageRoot)
+
+	rel, err := filepath.Rel(root, absHost)
+	if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return filepath.ToSlash(rel), nil
+	}
+
+	// Сравнение без учёта регистра (Windows) через ToSlash lower.
+	absSlash := strings.ToLower(filepath.ToSlash(absHost))
+	rootSlash := strings.ToLower(filepath.ToSlash(root))
+	if !strings.HasSuffix(rootSlash, "/") {
+		rootSlash += "/"
+	}
+	if strings.HasPrefix(absSlash, rootSlash) {
+		return filepath.ToSlash(absHost)[len(filepath.ToSlash(root))+1:], nil
+	}
+	return "", fmt.Errorf("path %s is outside storage root %s", absHost, root)
+}
+
+func parseFFmpegProbe(out []byte) (start, duration time.Duration, ok bool) {
+	s := string(out)
+	if m := reStart.FindStringSubmatch(s); len(m) == 2 {
+		if sec, err := strconv.ParseFloat(m[1], 64); err == nil {
+			start = time.Duration(sec * float64(time.Second))
+		}
+	}
+	m := reDuration.FindStringSubmatch(s)
+	if len(m) != 4 {
+		return start, 0, false
+	}
+	h, _ := strconv.Atoi(m[1])
+	min, _ := strconv.Atoi(m[2])
+	sec, err := strconv.ParseFloat(m[3], 64)
+	if err != nil {
+		return start, 0, false
+	}
+	duration = time.Duration(h)*time.Hour + time.Duration(min)*time.Minute + time.Duration(sec*float64(time.Second))
+	if duration <= 0 {
+		return start, 0, false
+	}
+	return start, duration, true
+}
+
+// Snapshot захватывает кадр из живого RTSP (быстрое уведомление).
 func (c *Clipper) Snapshot(ctx context.Context, sourceURL string, rel string) error {
 	ctx, cancel := context.WithTimeout(ctx, snapshotTimeout)
 	defer cancel()
@@ -321,7 +436,7 @@ func (c *Clipper) Snapshot(ctx context.Context, sourceURL string, rel string) er
 		args := []string{
 			"-y", "-rtsp_transport", "tcp",
 			"-i", sourceURL,
-			"-frames:v", "1", "-q:v", "2",
+			"-frames:v", "1", "-update", "1", "-q:v", "2",
 			out,
 		}
 		cmd := exec.CommandContext(ctx, c.ffmpegPath, args...)
@@ -335,16 +450,12 @@ func (c *Clipper) Snapshot(ctx context.Context, sourceURL string, rel string) er
 	url = strings.Replace(url, "://localhost", "://host.docker.internal", 1)
 
 	args := []string{
-		"run", "--rm",
-		"-v", c.storageRoot + ":/data",
-		c.image,
 		"-y", "-rtsp_transport", "tcp",
 		"-i", url,
-		"-frames:v", "1", "-q:v", "2",
+		"-frames:v", "1", "-update", "1", "-q:v", "2",
 		"/data/" + rel,
 	}
-	cmd := exec.CommandContext(ctx, "docker", args...)
-	if o, err := cmd.CombinedOutput(); err != nil {
+	if o, err := c.runDocker(ctx, "", args...); err != nil {
 		return fmt.Errorf("ffmpeg snapshot: %w: %s", err, tail(o))
 	}
 	return nil

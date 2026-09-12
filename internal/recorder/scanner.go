@@ -25,11 +25,14 @@ const (
 	// «по движению» хранить на диске (3 сегмента по 5 минут = 15 минут).
 	keepBufferSegments = 3
 
-	// motionPreRoll — предзапись клипа относительно кадра-якоря (5 секунд).
-	motionPreRoll = 5 * time.Second
-
 	// clipJobTTL — срок, после которого задача без сегментов помечается failed.
 	clipJobTTL = 2 * time.Hour
+
+	// preRoll — предзапись до триггера (должно совпадать с motion.preRoll).
+	preRoll = 10 * time.Second
+
+	// postRollWait — запас после WindowEnd, чтобы MediaMTX дописал хвост на диск.
+	postRollWait = 3 * time.Second
 )
 
 // mskZone — московское время (UTC+3, без сезонных переходов) для имён файлов.
@@ -65,18 +68,26 @@ func NewScanner(
 	interval time.Duration,
 	logger *slog.Logger,
 ) *Scanner {
-	storageDir := filepath.Dir(root)
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		absRoot = root
+	}
+	storageDir := filepath.Dir(absRoot)
+	absStorage, err := filepath.Abs(storageDir)
+	if err != nil {
+		absStorage = storageDir
+	}
 
 	return &Scanner{
 		repo:       repo,
 		cameraRepo: cameraRepo,
 		jobRepo:    jobRepo,
 		notifier:   notifier,
-		root:       root,
-		relBase:    filepath.ToSlash(filepath.Clean(storageDir)),
+		root:       absRoot,
+		relBase:    filepath.ToSlash(absStorage),
 		interval:   interval,
 		logger:     logger,
-		clip:       clipper.New(storageDir),
+		clip:       clipper.New(absStorage),
 		skipped:    make(map[string]bool),
 	}
 }
@@ -145,16 +156,8 @@ func (s *Scanner) scan(ctx context.Context) {
 		existing = append(existing, paths...)
 	}
 
-	// ВАЖНО: сначала обрабатываем задачи кадрирования,
-	// только потом ротируем буфер — чтобы сегмент не был удалён
-	// раньше, чем из него вырежут клип.
 	s.processClipJobs(ctx)
-
-	// Ротация буфера режима «по движению»: храним 3 последних сегмента,
-	// но защищаем сегменты, нужные для pending-задач клипов.
 	s.cleanupMotionBuffers(ctx)
-
-	// Очистка старых снимков движения.
 	s.pruneSnapshots()
 
 	if scanFailed {
@@ -181,13 +184,19 @@ func (s *Scanner) processClipJobs(ctx context.Context) {
 	}
 
 	for _, job := range jobs {
-		open, err := s.repo.HasOpenOverlapping(ctx, job.CameraID, job.WindowStart, job.WindowEnd)
+		triggerAt := job.WindowStart.Add(preRoll)
+
+		// Ждём, пока окно полностью запишется на диск.
+		if time.Now().Before(job.WindowEnd.Add(postRollWait)) {
+			continue
+		}
+
+		open, err := s.repo.HasOpenOverlapping(ctx, job.CameraID, triggerAt, triggerAt)
 		if err != nil {
 			s.logger.Error("clip job: open segment check failed", "job_id", job.ID, "error", err)
 			continue
 		}
 		if open {
-			// Покрывающий сегмент ещё пишется — ждём его закрытия.
 			continue
 		}
 
@@ -211,7 +220,7 @@ func (s *Scanner) processClipJobs(ctx context.Context) {
 			continue
 		}
 
-		firstClip, err := s.buildClips(ctx, job, segs)
+		clipRel, snapRel, err := s.buildMotionClip(ctx, job, segs, triggerAt)
 		if err != nil {
 			s.logger.Error("clip job failed", "job_id", job.ID, "error", err)
 			_ = s.jobRepo.SetStatus(ctx, job.ID, "failed", err.Error())
@@ -226,17 +235,23 @@ func (s *Scanner) processClipJobs(ctx context.Context) {
 			continue
 		}
 
+		if snapRel != "" {
+			job.SnapshotRel = snapRel
+		}
+
 		_ = s.jobRepo.SetStatus(ctx, job.ID, "done", "")
 		s.logger.Info("clip job completed",
 			"job_id", job.ID,
 			"window_start", job.WindowStart.Format(time.RFC3339),
 			"window_end", job.WindowEnd.Format(time.RFC3339),
+			"trigger_at", triggerAt.Format(time.RFC3339),
+			"clip", clipRel,
+			"snapshot", job.SnapshotRel,
 		)
 
-		// Клип готов и в архиве — отправляем видео в Telegram.
 		s.notifier.NotifyMotionClip(ctx, notify.MotionClipInfo{
 			CameraID:    job.CameraID,
-			ClipRel:     firstClip,
+			ClipRel:     clipRel,
 			SnapshotRel: job.SnapshotRel,
 			WindowStart: job.WindowStart,
 			WindowEnd:   job.WindowEnd,
@@ -245,126 +260,294 @@ func (s *Scanner) processClipJobs(ctx context.Context) {
 	}
 }
 
-// buildClips вырезает по одному клипу из каждого покрывающего сегмента
-// и возвращает относительный путь первого клипа.
-// Имена файлов клипов формируются в московском времени.
-func (s *Scanner) buildClips(ctx context.Context, job domain.ClipJob, segs []domain.Recording) (string, error) {
-	firstClip := ""
+// buildMotionClip вырезает один клип вокруг триггера и снимок ИЗ ТОГО ЖЕ
+// сегмента на смещении триггера — кадр гарантированно совпадает с видео.
+func (s *Scanner) buildMotionClip(
+	ctx context.Context,
+	job domain.ClipJob,
+	segs []domain.Recording,
+	triggerAt time.Time,
+) (clipRel, snapRel string, err error) {
+	type candidate struct {
+		seg          domain.Recording
+		segRel       string
+		contentStart time.Time
+		contentEnd   time.Time
+		offset       time.Duration
+		duration     time.Duration
+		triggerOff   time.Duration
+	}
+
+	var best *candidate
 
 	for _, seg := range segs {
 		if seg.EndedAt == nil {
 			continue
 		}
 
-		// Источник должен реально существовать и быть непустым.
-		// StoragePath хранится относительно рабочего каталога процесса
-		// (например, "storage/recordings/..."), префикс добавлять не нужно.
-		srcHost := filepath.FromSlash(seg.StoragePath)
-		if fi, err := os.Stat(srcHost); err != nil || fi.Size() == 0 {
-			s.logger.Warn("clip job: source segment missing or empty",
+		srcHost, err := s.hostPath(seg.StoragePath)
+		if err != nil {
+			s.logger.Warn("clip job: resolve source path failed",
 				"path", seg.StoragePath,
+				"error", err,
+			)
+			continue
+		}
+		fi, statErr := os.Stat(srcHost)
+		if statErr != nil || fi.Size() == 0 {
+			s.logger.Warn("clip job: source segment missing or empty", "path", srcHost)
+			continue
+		}
+
+		contentStart, contentEnd, mapErr := s.segmentTimeline(ctx, srcHost, seg.StartedAt, *seg.EndedAt)
+		if mapErr != nil {
+			// Без video-duration нельзя резать: имя файла = старт аудио (~40с раньше).
+			s.logger.Error("clip job: timeline probe required but failed",
+				"path", srcHost,
+				"error", mapErr,
 			)
 			continue
 		}
 
-		segStart := seg.StartedAt
-		segEnd := *seg.EndedAt
+		// Триггер должен попадать в содержимое сегмента.
+		if triggerAt.Before(contentStart) || !triggerAt.Before(contentEnd) {
+			s.logger.Info("clip source skip (trigger outside content)",
+				"segment", seg.StoragePath,
+				"content_start", contentStart.Format(time.RFC3339),
+				"content_end", contentEnd.Format(time.RFC3339),
+				"trigger_at", triggerAt.Format(time.RFC3339),
+			)
+			continue
+		}
 
 		winStart := job.WindowStart
-		if winStart.Before(segStart) {
-			winStart = segStart
+		if winStart.Before(contentStart) {
+			winStart = contentStart
 		}
 		winEnd := job.WindowEnd
-		if winEnd.After(segEnd) {
-			winEnd = segEnd
+		if winEnd.After(contentEnd) {
+			winEnd = contentEnd
 		}
 		if !winEnd.After(winStart) {
 			continue
 		}
 
-		offset := winStart.Sub(segStart)
-		duration := winEnd.Sub(winStart)
-
-		// Имя файла клипа — в московском времени (UTC+3).
-		clipRel := fmt.Sprintf("clips/cam_%s/%s.mp4",
-			job.CameraID, winStart.In(mskZone).Format("2006-01-02_15-04-05"))
-		hostClip := filepath.Join(s.relBase, filepath.FromSlash(clipRel))
-
-		if err := os.MkdirAll(filepath.Dir(hostClip), 0o755); err != nil {
-			return "", err
+		c := candidate{
+			seg:          seg,
+			segRel:       s.relFromStorage(seg.StoragePath),
+			contentStart: contentStart,
+			contentEnd:   contentEnd,
+			offset:       winStart.Sub(contentStart),
+			duration:     winEnd.Sub(winStart),
+			triggerOff:   triggerAt.Sub(contentStart),
 		}
 
-		segRel := strings.TrimPrefix(seg.StoragePath, s.relBase+"/")
+		s.logger.Info("clip source mapping",
+			"segment", seg.StoragePath,
+			"name_time", seg.StartedAt.Format(time.RFC3339),
+			"content_start", contentStart.Format(time.RFC3339),
+			"content_end", contentEnd.Format(time.RFC3339),
+			"trigger_at", triggerAt.Format(time.RFC3339),
+			"trigger_offset_sec", fmt.Sprintf("%.1f", c.triggerOff.Seconds()),
+			"cut_offset_sec", fmt.Sprintf("%.1f", c.offset.Seconds()),
+			"cut_duration_sec", fmt.Sprintf("%.1f", c.duration.Seconds()),
+			"name_delay_sec", fmt.Sprintf("%.1f", contentStart.Sub(seg.StartedAt).Seconds()),
+		)
 
-		// Никогда не режем файл из самого себя.
-		if segRel == clipRel {
-			continue
-		}
+		best = &c
+		break // сегменты отсортированы по started_at; первый подходящий — нужный
+	}
 
-		// Клип уже вырезан ранее — переиспользуем его и убеждаемся,
-		// что метаданные присутствуют в архиве.
-		if fi, err := os.Stat(hostClip); err == nil && fi.Size() > 0 {
-			ended := winEnd
-			rec := &domain.Recording{
-				CameraID:    job.CameraID,
-				StartedAt:   winStart,
-				EndedAt:     &ended,
-				StoragePath: filepath.ToSlash(hostClip),
-				SizeBytes:   fi.Size(),
-				Kept:        true,
-			}
-			if err := s.repo.InsertKept(ctx, rec); err != nil {
-				return "", err
-			}
-			if firstClip == "" {
-				firstClip = clipRel
-			}
-			continue
-		}
+	if best == nil {
+		return "", "", errors.New("no segment covers motion trigger")
+	}
 
-		// Привязка по снимку триггера: ищем кадр-якорь в сегменте и режем
-		// относительно него, компенсируя задержку первого ключевого кадра.
-		if job.SnapshotRel != "" {
-			if err := s.clip.CutAnchored(ctx, segRel, job.SnapshotRel, motionPreRoll, duration, offset, clipRel); err != nil {
-				return "", err
-			}
-		} else if err := s.clip.Cut(ctx, segRel, offset, duration, clipRel); err != nil {
-			return "", err
-		}
+	clipRel = fmt.Sprintf("clips/cam_%s/%s_%s.mp4",
+		job.CameraID,
+		triggerAt.In(mskZone).Format("2006-01-02_15-04-05"),
+		job.ID.String()[:8],
+	)
+	hostClip := filepath.Join(s.relBase, filepath.FromSlash(clipRel))
+	if err := os.MkdirAll(filepath.Dir(hostClip), 0o755); err != nil {
+		return "", "", err
+	}
 
-		info, err := os.Stat(hostClip)
-		if err != nil {
-			return "", err
-		}
+	if best.segRel == clipRel {
+		return "", "", errors.New("clip path collides with source")
+	}
 
-		ended := winEnd
-		rec := &domain.Recording{
-			CameraID:    job.CameraID,
-			StartedAt:   winStart,
-			EndedAt:     &ended,
-			StoragePath: filepath.ToSlash(hostClip),
-			SizeBytes:   info.Size(),
-			Kept:        true,
-		}
-		if err := s.repo.InsertKept(ctx, rec); err != nil {
-			return "", err
-		}
+	needCut := true
+	if fi, e := os.Stat(hostClip); e == nil && fi.Size() > 0 {
+		needCut = false
+	}
 
-		if firstClip == "" {
-			firstClip = clipRel
+	if needCut {
+		if err := s.clip.Cut(ctx, best.segRel, best.offset, best.duration, clipRel); err != nil {
+			return "", "", err
 		}
 	}
 
-	if firstClip == "" {
-		return "", errors.New("no clip produced")
+	info, err := os.Stat(hostClip)
+	if err != nil {
+		return "", "", err
 	}
-	return firstClip, nil
+
+	ended := best.contentStart.Add(best.offset + best.duration)
+	started := best.contentStart.Add(best.offset)
+	rec := &domain.Recording{
+		CameraID:    job.CameraID,
+		StartedAt:   started,
+		EndedAt:     &ended,
+		StoragePath: filepath.ToSlash(hostClip),
+		SizeBytes:   info.Size(),
+		Kept:        true,
+	}
+	if err := s.repo.InsertKept(ctx, rec); err != nil {
+		return "", "", err
+	}
+
+	// Снимок из того же сегмента на смещении триггера — тот же кадр, что в клипе.
+	snapRel = fmt.Sprintf("snapshots/cam_%s/%s_%s.jpg",
+		job.CameraID,
+		triggerAt.In(mskZone).Format("2006-01-02_15-04-05"),
+		job.ID.String()[:8],
+	)
+	if err := s.clip.ExtractFrame(ctx, best.segRel, best.triggerOff, snapRel); err != nil {
+		s.logger.Warn("clip job: extract trigger frame failed, keep live snapshot",
+			"error", err,
+		)
+		snapRel = job.SnapshotRel
+	}
+
+	return clipRel, snapRel, nil
 }
 
-// cleanupMotionBuffers удаляет сегменты буфера сверх лимита keepBufferSegments.
-// Помеченные kept (клипы и эпизоды) не удаляются никогда.
-// Сегменты, нужные для pending-задач клипов, НЕ удаляются — иначе
-// задача не сможет вырезать клип и перейдёт в failed.
+// segmentTimeline оценивает окно ВИДЕО-содержимого.
+// Имя файла MediaMTX ≈ старт аудио; первый кадр ≈ nameTime + (formatDur − videoDur)
+// или nextName − videoDuration.
+func (s *Scanner) segmentTimeline(
+	ctx context.Context,
+	srcHost string,
+	nameTime, nextNameTime time.Time,
+) (contentStart, contentEnd time.Time, err error) {
+	probe, err := s.clip.Probe(ctx, srcHost)
+	if err != nil {
+		return time.Time{}, time.Time{}, err
+	}
+	videoDur := probe.ContentDuration()
+	if videoDur < time.Second {
+		return time.Time{}, time.Time{}, fmt.Errorf("video duration too small")
+	}
+
+	audioLead := probe.FormatDuration - videoDur
+	if audioLead < 0 {
+		audioLead = 0
+	}
+
+	// Предпочтительно: старт видео = открытие файла + опережение аудио.
+	if audioLead > 2*time.Second {
+		contentStart = nameTime.Add(audioLead)
+		contentEnd = contentStart.Add(videoDur)
+		if !nextNameTime.IsZero() && absDuration(contentEnd.Sub(nextNameTime)) < 45*time.Second {
+			contentEnd = nextNameTime
+		}
+	} else if !nextNameTime.IsZero() {
+		contentEnd = nextNameTime
+		contentStart = contentEnd.Add(-videoDur)
+	} else {
+		fi, stErr := os.Stat(srcHost)
+		if stErr != nil {
+			return time.Time{}, time.Time{}, stErr
+		}
+		contentEnd = fi.ModTime()
+		contentStart = contentEnd.Add(-videoDur)
+	}
+
+	if contentStart.Before(nameTime) {
+		contentStart = nameTime
+		contentEnd = contentStart.Add(videoDur)
+	}
+
+	s.logger.Info("segment timeline",
+		"path", srcHost,
+		"name_time", nameTime.Format(time.RFC3339),
+		"video_dur_sec", fmt.Sprintf("%.1f", videoDur.Seconds()),
+		"format_dur_sec", fmt.Sprintf("%.1f", probe.FormatDuration.Seconds()),
+		"audio_lead_sec", fmt.Sprintf("%.1f", audioLead.Seconds()),
+		"content_start", contentStart.Format(time.RFC3339),
+		"content_end", contentEnd.Format(time.RFC3339),
+	)
+
+	if !contentEnd.After(contentStart) {
+		return time.Time{}, time.Time{}, fmt.Errorf("invalid content window")
+	}
+	return contentStart, contentEnd, nil
+}
+
+func absDuration(d time.Duration) time.Duration {
+	if d < 0 {
+		return -d
+	}
+	return d
+}
+
+// hostPath приводит путь из БД к абсолютному файлу на диске.
+func (s *Scanner) hostPath(storagePath string) (string, error) {
+	p := filepath.Clean(filepath.FromSlash(storagePath))
+	if filepath.IsAbs(p) {
+		if _, err := os.Stat(p); err == nil {
+			return p, nil
+		}
+	}
+
+	candidates := []string{
+		filepath.Join(filepath.FromSlash(s.relBase), p),
+		p,
+	}
+	slash := filepath.ToSlash(p)
+	if i := strings.Index(slash, "recordings/"); i >= 0 {
+		candidates = append(candidates, filepath.Join(filepath.FromSlash(s.relBase), filepath.FromSlash(slash[i:])))
+	}
+	base := filepath.Base(filepath.FromSlash(s.relBase))
+	if strings.HasPrefix(slash, base+"/") {
+		candidates = append(candidates, filepath.Join(filepath.FromSlash(s.relBase), filepath.FromSlash(strings.TrimPrefix(slash, base+"/"))))
+	}
+
+	for _, c := range candidates {
+		if abs, err := filepath.Abs(c); err == nil {
+			c = abs
+		}
+		if _, err := os.Stat(c); err == nil {
+			return c, nil
+		}
+	}
+	return "", fmt.Errorf("file not found for storage path %s", storagePath)
+}
+
+func (s *Scanner) relFromStorage(storagePath string) string {
+	host, err := s.hostPath(storagePath)
+	if err != nil {
+		slash := filepath.ToSlash(storagePath)
+		if i := strings.Index(slash, "recordings/"); i >= 0 {
+			return slash[i:]
+		}
+		prefix := s.relBase + "/"
+		if strings.HasPrefix(strings.ToLower(slash), strings.ToLower(prefix)) {
+			return slash[len(prefix):]
+		}
+		return slash
+	}
+	slashHost := filepath.ToSlash(host)
+	prefix := s.relBase + "/"
+	if len(slashHost) > len(prefix) && strings.EqualFold(slashHost[:len(prefix)], prefix) {
+		return slashHost[len(prefix):]
+	}
+	if i := strings.Index(slashHost, "recordings/"); i >= 0 {
+		return slashHost[i:]
+	}
+	return filepath.Base(host)
+}
+
 func (s *Scanner) cleanupMotionBuffers(ctx context.Context) {
 	cams, err := s.cameraRepo.List(ctx)
 	if err != nil {
@@ -400,7 +583,6 @@ func (s *Scanner) cleanupMotionBuffers(ctx context.Context) {
 				continue
 			}
 			if needed {
-				// Сегмент ещё нужен для кадрирования — оставляем.
 				skipped++
 				continue
 			}
@@ -433,7 +615,6 @@ func (s *Scanner) cleanupMotionBuffers(ctx context.Context) {
 	}
 }
 
-// pruneSnapshots удаляет снимки движения старше 7 суток.
 func (s *Scanner) pruneSnapshots() {
 	root := filepath.Join(filepath.Dir(s.root), "snapshots")
 	camDirs, err := os.ReadDir(root)
@@ -453,6 +634,9 @@ func (s *Scanner) pruneSnapshots() {
 			continue
 		}
 		for _, f := range files {
+			if strings.HasPrefix(f.Name(), "_") {
+				continue
+			}
 			info, err := f.Info()
 			if err != nil || info.IsDir() {
 				continue
@@ -476,8 +660,6 @@ type segment struct {
 	size      int64
 }
 
-// scanCamera синхронизирует сегменты одной камеры и возвращает
-// список путей файлов, которые реально существуют на диске.
 func (s *Scanner) scanCamera(ctx context.Context, cameraID uuid.UUID, dir string) ([]string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -490,8 +672,8 @@ func (s *Scanner) scanCamera(ctx context.Context, cameraID uuid.UUID, dir string
 			continue
 		}
 
-		// Имена сегментов MediaMTX остаются в UTC: их пишет сам MediaMTX.
-		startedAt, err := time.Parse("2006-01-02_15-04-05", strings.TrimSuffix(e.Name(), ".mp4"))
+		// MediaMTX без TZ пишет имена в UTC.
+		startedAt, err := time.ParseInLocation("2006-01-02_15-04-05", strings.TrimSuffix(e.Name(), ".mp4"), time.UTC)
 		if err != nil {
 			continue
 		}
@@ -522,6 +704,9 @@ func (s *Scanner) scanCamera(ctx context.Context, cameraID uuid.UUID, dir string
 		}
 
 		storagePath := filepath.ToSlash(seg.path)
+		if abs, err := filepath.Abs(seg.path); err == nil {
+			storagePath = filepath.ToSlash(abs)
+		}
 		paths = append(paths, storagePath)
 
 		rec := &domain.Recording{
@@ -543,8 +728,6 @@ func (s *Scanner) scanCamera(ctx context.Context, cameraID uuid.UUID, dir string
 	return paths, nil
 }
 
-// isForeignKeyViolation распознаёт нарушение внешнего ключа:
-// штатный признак того, что камера удалена из базы.
 func isForeignKeyViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {

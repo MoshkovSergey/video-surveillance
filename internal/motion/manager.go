@@ -16,19 +16,16 @@ import (
 )
 
 const (
-	// reconcileInterval — период сверки списка камер.
 	reconcileInterval = 30 * time.Second
 	// episodeCooldown — пауза без движения, завершающая эпизод.
 	episodeCooldown = 10 * time.Second
-	// preRoll — предзапись клипа: 5 секунд до триггера.
-	preRoll = 5 * time.Second
-	// postRoll — постзапись клипа: 5 секунд после окончания.
-	postRoll = 5 * time.Second
-	// resubscribeAfter — срок жизни PullPoint-подписки.
+	// preRoll — секунд до триггера в клипе (должно совпадать с recorder.preRoll).
+	preRoll = 10 * time.Second
+	// postRoll — секунд после конца эпизода.
+	postRoll         = 10 * time.Second
 	resubscribeAfter = 4 * time.Minute
 )
 
-// mskZone — московское время (UTC+3, без сезонных переходов) для имён файлов.
 var mskZone = time.FixedZone("MSK", 3*60*60)
 
 // Manager управляет воркерами детекции движения по событиям ONVIF.
@@ -43,7 +40,6 @@ type Manager struct {
 	workers map[uuid.UUID]context.CancelFunc
 }
 
-// NewManager создает менеджер детекции движения.
 func NewManager(
 	cameraRepo *postgres.CameraRepository,
 	eventRepo *postgres.EventRepository,
@@ -61,7 +57,6 @@ func NewManager(
 	}
 }
 
-// Start запускает цикл сверки камер и воркеров детекции.
 func (m *Manager) Start(ctx context.Context) {
 	go func() {
 		ticker := time.NewTicker(reconcileInterval)
@@ -89,7 +84,6 @@ func (m *Manager) stopAll() {
 	}
 }
 
-// reconcile синхронизирует набор воркеров с настройками камер.
 func (m *Manager) reconcile(ctx context.Context) {
 	cams, err := m.cameraRepo.List(ctx)
 	if err != nil {
@@ -128,7 +122,14 @@ func (m *Manager) reconcile(ctx context.Context) {
 	}
 }
 
-// worker слушает события одной камеры и формирует эпизоды движения.
+// worker слушает ONVIF и формирует эпизоды.
+//
+// Алгоритм:
+//  1. Триггер → wall-clock triggerAt + быстрый снимок с live RTSP (Telegram сразу).
+//  2. Конец эпизода → clip_job с окном [trigger−preRoll, end+postRoll].
+//  3. Scanner вырезает клип из записи MediaMTX по реальному началу содержимого
+//     (mtime − duration), а эталонный кадр берёт ИЗ ТОГО ЖЕ файла на смещении
+//     триггера — поэтому человек на фото и в видео совпадают.
 func (m *Manager) worker(ctx context.Context, cam domain.Camera) {
 	creds := onvif.Credentials{Username: cam.ONVIF.Username, Password: cam.ONVIF.Password}
 	port := cam.ONVIF.Port
@@ -138,41 +139,58 @@ func (m *Manager) worker(ctx context.Context, cam domain.Camera) {
 
 	var episodeStart, lastActive time.Time
 
-	// snapMu защищает путь снимка текущего эпизода.
 	var snapMu sync.Mutex
+	var snapWG sync.WaitGroup
 	snapRel := ""
 
-	// startSnapshot асинхронно захватывает кадр живого потока в момент триггера.
-	// Имя файла снимка формируется в московском времени.
-	startSnapshot := func() {
+	startSnapshot := func(triggerAt time.Time) {
 		rel := fmt.Sprintf("snapshots/cam_%s/%s.jpg",
-			cam.ID, time.Now().In(mskZone).Format("2006-01-02_15-04-05"))
+			cam.ID, triggerAt.In(mskZone).Format("2006-01-02_15-04-05"))
 		source := fmt.Sprintf("rtsp://127.0.0.1:8554/cam_%s", cam.ID)
 
+		snapMu.Lock()
+		snapRel = rel
+		snapMu.Unlock()
+
+		snapWG.Add(1)
 		go func() {
+			defer snapWG.Done()
+
 			bg, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			defer cancel()
 
 			if err := m.clip.Snapshot(bg, source, rel); err != nil {
-				m.logger.Warn("motion: snapshot failed",
+				m.logger.Warn("motion: live snapshot failed",
 					"camera_id", cam.ID,
 					"error", err,
 				)
+				snapMu.Lock()
+				if snapRel == rel {
+					snapRel = ""
+				}
+				snapMu.Unlock()
 				return
 			}
 
-			snapMu.Lock()
-			snapRel = rel
-			snapMu.Unlock()
-
-			m.logger.Info("motion: snapshot captured",
+			m.logger.Info("motion: live snapshot captured",
 				"camera_id", cam.ID,
 				"path", rel,
+				"trigger_at", triggerAt.Format(time.RFC3339),
 			)
 		}()
 	}
 
 	closeEpisode := func(end time.Time) {
+		done := make(chan struct{})
+		go func() {
+			snapWG.Wait()
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-time.After(20 * time.Second):
+		}
+
 		snapMu.Lock()
 		snapshot := snapRel
 		snapRel = ""
@@ -183,6 +201,7 @@ func (m *Manager) worker(ctx context.Context, cam domain.Camera) {
 			"ended_at":     end.Format(time.RFC3339),
 			"duration_sec": int(end.Sub(episodeStart).Seconds()),
 			"source":       "onvif",
+			"trigger_at":   episodeStart.Format(time.RFC3339),
 		}
 		if snapshot != "" {
 			payload["snapshot"] = snapshot
@@ -195,11 +214,14 @@ func (m *Manager) worker(ctx context.Context, cam domain.Camera) {
 			OccurredAt: end,
 			Payload:    payload,
 		}
-		if err := m.eventRepo.Create(ctx, ev); err != nil {
+
+		dbCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		if err := m.eventRepo.Create(dbCtx, ev); err != nil {
 			m.logger.Error("motion: failed to create event", "camera_id", cam.ID, "error", err)
 		}
 
-		// Окно клипа: 5 секунд предзаписи и 5 секунд постзаписи.
 		job := &domain.ClipJob{
 			ID:          uuid.New(),
 			CameraID:    cam.ID,
@@ -208,13 +230,13 @@ func (m *Manager) worker(ctx context.Context, cam domain.Camera) {
 			Status:      "pending",
 			SnapshotRel: snapshot,
 		}
-		if err := m.jobRepo.Create(ctx, job); err != nil {
+		if err := m.jobRepo.Create(dbCtx, job); err != nil {
 			m.logger.Error("motion: failed to create clip job", "camera_id", cam.ID, "error", err)
 		}
 
 		m.logger.Info("motion episode closed",
 			"camera_id", cam.ID,
-			"started_at", episodeStart.Format(time.RFC3339),
+			"trigger_at", episodeStart.Format(time.RFC3339),
 			"ended_at", end.Format(time.RFC3339),
 			"clip_window", job.WindowStart.Format(time.RFC3339)+".."+job.WindowEnd.Format(time.RFC3339),
 			"snapshot", snapshot,
@@ -225,7 +247,6 @@ func (m *Manager) worker(ctx context.Context, cam domain.Camera) {
 	subURL := ""
 
 	for ctx.Err() == nil {
-		// Корректно закрываем предыдущую подписку: камера держит лимит подписок.
 		if subURL != "" {
 			onvif.Unsubscribe(ctx, subURL, creds)
 			subURL = ""
@@ -268,8 +289,9 @@ func (m *Manager) worker(ctx context.Context, cam domain.Camera) {
 						m.logger.Info("motion episode started",
 							"camera_id", cam.ID,
 							"topic", msg.Topic,
+							"trigger_at", episodeStart.Format(time.RFC3339),
 						)
-						startSnapshot()
+						startSnapshot(episodeStart)
 					}
 					lastActive = now
 				}
@@ -281,7 +303,6 @@ func (m *Manager) worker(ctx context.Context, cam domain.Camera) {
 		}
 	}
 
-	// При остановке воркера освобождаем подписку на камере.
 	if subURL != "" {
 		onvif.Unsubscribe(context.Background(), subURL, creds)
 	}
