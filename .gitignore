@@ -13,6 +13,7 @@
 
 # Go
 vendor/
+.config/
 
 # Node / React
 web/node_modules/
