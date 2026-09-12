@@ -95,7 +95,7 @@ func run(ctx context.Context) error {
 		cameraRepo,
 		settingsRepo,
 		logger,
-		10*time.Second,
+		5*time.Second,
 		cfg.StoragePath,
 	)
 	notifier.Start(ctx)
