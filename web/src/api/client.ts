@@ -94,7 +94,7 @@ async function tryRefresh(): Promise<boolean> {
 
 // ---------- Центральный fetch с авторизацией ----------
 
-async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
+export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const build = (): RequestInit => {
     const headers = new Headers(init.headers);
     const token = localStorage.getItem(ACCESS_KEY);

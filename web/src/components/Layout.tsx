@@ -28,6 +28,9 @@ export default function Layout() {
           <NavLink to="/monitor">
             Монитор
           </NavLink>
+          <NavLink to="/plans">
+            План
+          </NavLink>
           <NavLink to="/archive">
             Архив
           </NavLink>

@@ -13,6 +13,8 @@ import EventsPage from './pages/EventsPage';
 import UsersPage from './pages/UsersPage';
 import DiscoveryPage from './pages/DiscoveryPage';
 import SettingsPage from './pages/SettingsPage';
+import PlansPage from './pages/PlansPage';
+import PlanViewPage from './pages/PlanViewPage';
 
 const queryClient = new QueryClient();
 
@@ -29,6 +31,8 @@ function App() {
                 <Route element={<Layout />}>
                   <Route path="/" element={<CameraListPage />} />
                   <Route path="/monitor" element={<MonitorPage />} />
+                  <Route path="/plans" element={<PlansPage />} />
+                  <Route path="/plans/:id" element={<PlanViewPage />} />
                   <Route path="/cameras/:id/view" element={<CameraViewPage />} />
                   <Route path="/archive" element={<ArchivePage />} />
                   <Route path="/events" element={<EventsPage />} />
