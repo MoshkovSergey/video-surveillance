@@ -34,6 +34,9 @@ export default function Layout() {
           <NavLink to="/archive">
             Архив
           </NavLink>
+          <NavLink to="/timeline">
+            Таймлайн
+          </NavLink>
           <NavLink to="/events">
             События
           </NavLink>

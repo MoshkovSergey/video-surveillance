@@ -25,11 +25,11 @@ import (
 	"gitverse.ru/cataclysm78/video-surveillance/internal/notify"
 	"gitverse.ru/cataclysm78/video-surveillance/internal/postgres"
 	"gitverse.ru/cataclysm78/video-surveillance/internal/recorder"
+	"gitverse.ru/cataclysm78/video-surveillance/internal/timesync"
 )
 
 func main() {
 	loadEnv()
-
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -60,7 +60,6 @@ func run(ctx context.Context) error {
 	if cfg.JWTSecret == "dev-secret-change-me" {
 		logger.Warn("JWT_SECRET uses development default; change it before production use")
 	}
-
 
 	pool, err := postgres.NewPool(ctx, cfg.DatabaseURL)
 	if err != nil {
@@ -95,10 +94,15 @@ func run(ctx context.Context) error {
 		cameraRepo,
 		settingsRepo,
 		logger,
-		5*time.Second,
+		3*time.Second,
 		cfg.StoragePath,
 	)
 	notifier.Start(ctx)
+
+	// Автоматическая синхронизация времени камер с ПК (ONVIF, раз в час).
+	timeSync := timesync.NewManager(cameraRepo, settingsRepo, logger)
+	timesync.SetDefault(timeSync)
+	timeSync.Start(ctx)
 
 	// Сканер записей: синхронизация, ротация, кадрирование, отправка видео.
 	scanner := recorder.NewScanner(
@@ -126,14 +130,13 @@ func run(ctx context.Context) error {
 		absStorage = cfg.StoragePath
 	}
 	api := httpapi.NewHandler(pool, cameraRepo, recordingRepo, eventRepo, userRepo, media, tokens, absStorage, logger)
-	
 
 	final := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/healthz") {
 			api.ServeHTTP(w, r)
 			return
 		}
-		
+
 	})
 
 	server := &http.Server{

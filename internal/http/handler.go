@@ -111,6 +111,7 @@ func NewHandler(
 	mux.HandleFunc("DELETE /api/v1/plans/{id}", h.requireRoles(h.handleDeletePlan, domain.RoleAdmin))
 	mux.HandleFunc("PUT /api/v1/plans/{id}/objects", h.requireRoles(h.handlePutPlanObjects, domain.RoleAdmin))
 	mux.HandleFunc("GET /api/v1/plans/{id}/status", h.requireAuth(h.handlePlanStatus))
+	mux.HandleFunc("POST /api/v1/settings/time-sync/run", h.requireRoles(h.handleTimeSyncRun, domain.RoleAdmin))
 
 	return h.recover(h.logRequests(h.authMiddleware(mux)))
 }

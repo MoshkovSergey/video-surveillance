@@ -9,6 +9,7 @@ import CameraListPage from './pages/CameraListPage';
 import MonitorPage from './pages/MonitorPage';
 import CameraViewPage from './pages/CameraViewPage';
 import ArchivePage from './pages/ArchivePage';
+import TimelinePage from './pages/TimelinePage';
 import EventsPage from './pages/EventsPage';
 import UsersPage from './pages/UsersPage';
 import DiscoveryPage from './pages/DiscoveryPage';
@@ -35,6 +36,7 @@ function App() {
                   <Route path="/plans/:id" element={<PlanViewPage />} />
                   <Route path="/cameras/:id/view" element={<CameraViewPage />} />
                   <Route path="/archive" element={<ArchivePage />} />
+                  <Route path="/timeline" element={<TimelinePage />} />
                   <Route path="/events" element={<EventsPage />} />
                   <Route path="/users" element={<UsersPage />} />
                   <Route path="/discovery" element={<DiscoveryPage />} />

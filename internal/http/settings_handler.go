@@ -7,6 +7,7 @@ import (
 	"gitverse.ru/cataclysm78/video-surveillance/internal/domain"
 	"gitverse.ru/cataclysm78/video-surveillance/internal/notify"
 	"gitverse.ru/cataclysm78/video-surveillance/internal/postgres"
+	"gitverse.ru/cataclysm78/video-surveillance/internal/timesync"
 )
 
 type settingsDTO struct {
@@ -15,6 +16,8 @@ type settingsDTO struct {
 	TelegramTokenSet    bool     `json:"telegram_bot_token_set"`
 	TelegramTokenMasked string   `json:"telegram_bot_token_masked"`
 	TelegramEvents      []string `json:"telegram_events"`
+	TimeSyncEnabled     bool     `json:"time_sync_enabled"`
+	TimeSyncTZ          string   `json:"time_sync_tz"`
 }
 
 type updateSettingsRequest struct {
@@ -22,6 +25,8 @@ type updateSettingsRequest struct {
 	TelegramChatID  *string  `json:"telegram_chat_id"`
 	TelegramToken   *string  `json:"telegram_bot_token"`
 	TelegramEvents  []string `json:"telegram_events"`
+	TimeSyncEnabled *bool    `json:"time_sync_enabled"`
+	TimeSyncTZ      *string  `json:"time_sync_tz"`
 }
 
 type telegramTestRequest struct {
@@ -37,6 +42,10 @@ var allEventTypes = []string{
 	string(domain.EventSmokeDetection),
 	string(domain.EventManualAlarm),
 	string(domain.EventRecordingError),
+}
+
+var validTZModes = map[string]bool{
+	"auto": true, "posix": true, "naive": true, "utc": true,
 }
 
 func validEventType(t string) bool {
@@ -59,7 +68,7 @@ func (h *Handler) settingsRepo() *postgres.SettingsRepository {
 	return postgres.NewSettingsRepository(h.pool)
 }
 
-// handleGetSettings возвращает настройки уведомлений (только admin).
+// handleGetSettings возвращает настройки (только admin).
 func (h *Handler) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	all, err := h.settingsRepo().All(r.Context())
 	if err != nil {
@@ -68,9 +77,16 @@ func (h *Handler) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	tzMode := all[timesync.KeyTimeSyncTZ]
+	if tzMode == "" {
+		tzMode = "auto"
+	}
+
 	dto := settingsDTO{
 		TelegramEnabled: all[notify.KeyTelegramEnabled] == "true",
 		TelegramChatID:  all[notify.KeyTelegramChatID],
+		TimeSyncEnabled: all[timesync.KeyTimeSyncEnabled] == "true",
+		TimeSyncTZ:      tzMode,
 	}
 	if tok := all[notify.KeyTelegramToken]; tok != "" {
 		dto.TelegramTokenSet = true
@@ -86,7 +102,7 @@ func (h *Handler) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, dto)
 }
 
-// handleUpdateSettings обновляет настройки уведомлений (только admin).
+// handleUpdateSettings обновляет настройки (только admin).
 func (h *Handler) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	var req updateSettingsRequest
 	if err := decodeJSON(r, &req); err != nil {
@@ -97,12 +113,16 @@ func (h *Handler) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	repo := h.settingsRepo()
 	ctx := r.Context()
 
+	save := func(key, value string) error {
+		return repo.Set(ctx, key, value)
+	}
+
 	if req.TelegramEnabled != nil {
 		v := "false"
 		if *req.TelegramEnabled {
 			v = "true"
 		}
-		if err := repo.Set(ctx, notify.KeyTelegramEnabled, v); err != nil {
+		if err := save(notify.KeyTelegramEnabled, v); err != nil {
 			h.logger.Error("failed to save setting", "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "внутренняя ошибка сервера"})
 			return
@@ -110,7 +130,7 @@ func (h *Handler) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.TelegramChatID != nil {
-		if err := repo.Set(ctx, notify.KeyTelegramChatID, strings.TrimSpace(*req.TelegramChatID)); err != nil {
+		if err := save(notify.KeyTelegramChatID, strings.TrimSpace(*req.TelegramChatID)); err != nil {
 			h.logger.Error("failed to save setting", "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "внутренняя ошибка сервера"})
 			return
@@ -119,7 +139,7 @@ func (h *Handler) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 
 	// Пустой токен означает «не менять».
 	if req.TelegramToken != nil && strings.TrimSpace(*req.TelegramToken) != "" {
-		if err := repo.Set(ctx, notify.KeyTelegramToken, strings.TrimSpace(*req.TelegramToken)); err != nil {
+		if err := save(notify.KeyTelegramToken, strings.TrimSpace(*req.TelegramToken)); err != nil {
 			h.logger.Error("failed to save setting", "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "внутренняя ошибка сервера"})
 			return
@@ -133,7 +153,32 @@ func (h *Handler) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 				clean = append(clean, t)
 			}
 		}
-		if err := repo.Set(ctx, notify.KeyTelegramEvents, strings.Join(clean, ",")); err != nil {
+		if err := save(notify.KeyTelegramEvents, strings.Join(clean, ",")); err != nil {
+			h.logger.Error("failed to save setting", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "внутренняя ошибка сервера"})
+			return
+		}
+	}
+
+	if req.TimeSyncEnabled != nil {
+		v := "false"
+		if *req.TimeSyncEnabled {
+			v = "true"
+		}
+		if err := save(timesync.KeyTimeSyncEnabled, v); err != nil {
+			h.logger.Error("failed to save setting", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "внутренняя ошибка сервера"})
+			return
+		}
+	}
+
+	if req.TimeSyncTZ != nil {
+		mode := strings.TrimSpace(*req.TimeSyncTZ)
+		if !validTZModes[mode] {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "недопустимый режим часового пояса"})
+			return
+		}
+		if err := save(timesync.KeyTimeSyncTZ, mode); err != nil {
 			h.logger.Error("failed to save setting", "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "внутренняя ошибка сервера"})
 			return
@@ -176,4 +221,16 @@ func (h *Handler) handleTelegramTest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "sent"})
+}
+
+// handleTimeSyncRun выполняет принудительную синхронизацию времени камер (только admin).
+func (h *Handler) handleTimeSyncRun(w http.ResponseWriter, r *http.Request) {
+	mgr := timesync.Default()
+	if mgr == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "менеджер синхронизации не запущен"})
+		return
+	}
+
+	results := mgr.SyncNow(r.Context())
+	writeJSON(w, http.StatusOK, map[string]any{"results": results})
 }
