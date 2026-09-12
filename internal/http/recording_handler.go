@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -55,7 +56,21 @@ func (h *Handler) handleListRecordings(w http.ResponseWriter, r *http.Request) {
 		keptFilter = &v
 	}
 
-	recordings, err := h.recordingRepo.List(r.Context(), cameraID, from, to, keptFilter)
+	limit := 20
+	if v := q.Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+		}
+	}
+
+	offset := 0
+	if v := q.Get("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			offset = n
+		}
+	}
+
+	recordings, err := h.recordingRepo.List(r.Context(), cameraID, from, to, keptFilter, limit, offset)
 	if err != nil {
 		h.logger.Error("failed to list recordings", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})

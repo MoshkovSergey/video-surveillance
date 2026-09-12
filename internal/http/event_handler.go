@@ -11,15 +11,15 @@ import (
 )
 
 // allowedEventTypes — белый список допустимых значений фильтра type.
-var allowedEventTypes = map[string]struct{}{
-	string(domain.EventMotion):         {},
-	string(domain.EventCameraOnline):   {},
-	string(domain.EventCameraOffline):  {},
-	string(domain.EventFireAlarm):      {},
-	string(domain.EventSmokeDetection): {},
-	string(domain.EventManualAlarm):    {},
-	string(domain.EventRecordingError): {},
-}
+// var allowedEventTypes = map[string]struct{}{
+// 	string(domain.EventMotion):         {},
+// 	string(domain.EventCameraOnline):   {},
+// 	string(domain.EventCameraOffline):  {},
+// 	string(domain.EventFireAlarm):      {},
+// 	string(domain.EventSmokeDetection): {},
+// 	string(domain.EventManualAlarm):    {},
+// 	string(domain.EventRecordingError): {},
+// }
 
 // handleListEvents возвращает журнал событий с фильтрами.
 func (h *Handler) handleListEvents(w http.ResponseWriter, r *http.Request) {
@@ -35,12 +35,10 @@ func (h *Handler) handleListEvents(w http.ResponseWriter, r *http.Request) {
 		cameraID = &id
 	}
 
-	eventType := q.Get("type")
-	if eventType != "" {
-		if _, ok := allowedEventTypes[eventType]; !ok {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid type"})
-			return
-		}
+	var typ *domain.EventType
+	if v := q.Get("type"); v != "" {
+		t := domain.EventType(v)
+		typ = &t
 	}
 
 	var from, to *time.Time
@@ -61,27 +59,25 @@ func (h *Handler) handleListEvents(w http.ResponseWriter, r *http.Request) {
 		to = &t
 	}
 
-	limit := 200
+	limit := 20
 	if v := q.Get("limit"); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil || n <= 0 {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid limit"})
-			return
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
 		}
-		if n > 1000 {
-			n = 1000
-		}
-		limit = n
 	}
 
-	events, err := h.eventRepo.List(r.Context(), cameraID, eventType, from, to, limit)
+	offset := 0
+	if v := q.Get("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			offset = n
+		}
+	}
+
+	events, err := h.eventRepo.List(r.Context(), cameraID, typ, from, to, limit, offset)
 	if err != nil {
 		h.logger.Error("failed to list events", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
 		return
-	}
-	if events == nil {
-		events = []domain.Event{}
 	}
 
 	writeJSON(w, http.StatusOK, events)

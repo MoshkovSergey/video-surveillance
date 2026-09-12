@@ -13,6 +13,7 @@ export interface RecordingsQuery {
   camera_id?: string;
   from?: string;
   to?: string;
-  /** true — только клипы из storage/clips */
   kept?: boolean;
+  limit?: number;
+  offset?: number;
 }

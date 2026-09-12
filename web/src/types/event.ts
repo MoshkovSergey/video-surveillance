@@ -25,4 +25,5 @@ export interface EventsQuery {
   from?: string;
   to?: string;
   limit?: number;
+  offset?: number;
 }

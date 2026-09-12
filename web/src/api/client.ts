@@ -320,8 +320,9 @@ export async function getRecordings(params: RecordingsQuery = {}): Promise<Recor
   if (params.camera_id) search.set('camera_id', params.camera_id);
   if (params.from) search.set('from', params.from);
   if (params.to) search.set('to', params.to);
-  if (params.kept === true) search.set('kept', 'true');
-  if (params.kept === false) search.set('kept', 'false');
+  if (params.kept !== undefined) search.set('kept', String(params.kept));
+  if (params.limit !== undefined) search.set('limit', String(params.limit));
+  if (params.offset !== undefined) search.set('offset', String(params.offset));
 
   const qs = search.toString();
   const res = await apiFetch(`/recordings${qs ? `?${qs}` : ''}`);
@@ -347,7 +348,8 @@ export async function getEvents(params: EventsQuery = {}): Promise<SystemEvent[]
   if (params.type) search.set('type', params.type);
   if (params.from) search.set('from', params.from);
   if (params.to) search.set('to', params.to);
-  if (params.limit) search.set('limit', String(params.limit));
+  if (params.limit !== undefined) search.set('limit', String(params.limit));
+  if (params.offset !== undefined) search.set('offset', String(params.offset));
 
   const qs = search.toString();
   const res = await apiFetch(`/events${qs ? `?${qs}` : ''}`);

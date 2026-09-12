@@ -435,13 +435,6 @@ func (s *Scanner) buildMotionClip(
 	return clipRel, snapRel, nil
 }
 
-func absDuration(d time.Duration) time.Duration {
-	if d < 0 {
-		return -d
-	}
-	return d
-}
-
 // hostPath приводит путь из БД к абсолютному файлу на диске.
 func (s *Scanner) hostPath(storagePath string) (string, error) {
 	p := filepath.Clean(filepath.FromSlash(storagePath))

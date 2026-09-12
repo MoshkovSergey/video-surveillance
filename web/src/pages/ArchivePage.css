@@ -1,121 +1,153 @@
-.archive-header {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-  margin-bottom: 8px;
-}
+/* ---------- Таблица архива клипов ---------- */
 
-.archive-header h1 {
-  margin-bottom: 0;
-}
-
-.archive-count {
-  font-size: 0.95rem;
-  color: var(--muted);
-}
-
-.archive-count strong {
-  color: var(--text);
-  font-variant-numeric: tabular-nums;
-}
-
-.archive-row-active td {
-  background: rgba(124, 58, 237, 0.12);
-}
-
-.archive-controls {
-  display: flex;
-  gap: 16px;
-  align-items: end;
-  margin-bottom: 16px;
-  flex-wrap: wrap;
-}
-
-.archive-controls label {
+.archive-table {
   display: grid;
-  gap: 4px;
-  font-size: 0.9rem;
-  color: #444444;
+  gap: 6px;
+  margin-top: 8px;
 }
 
-.archive-controls select,
-.archive-controls input {
-  padding: 8px 10px;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.05);
+.archive-header,
+.archive-row {
+  display: grid;
+  grid-template-columns: 1.1fr 0.7fr 0.7fr 1fr 0.7fr;
+  gap: 14px;
+  align-items: center;
+  padding: 10px 16px;
+}
+
+.archive-header {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.archive-row {
   border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--glass);
+  font-size: 0.88rem;
   color: var(--text);
-  font-family: var(--font-body);
-  font-size: 1rem;
-  outline: none;
+  transition: border-color 0.2s, background 0.2s;
 }
 
-.archive-controls select:focus,
-.archive-controls input:focus {
+.archive-row:hover {
   border-color: var(--border-accent);
-  box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.22);
+  background: rgba(255, 255, 255, 0.06);
 }
 
-.archive-player {
-  margin-bottom: 16px;
-  background: #000000;
-  border-radius: 14px;
+.archive-row span {
   overflow: hidden;
-  border: 1px solid var(--border);
-  box-shadow: 0 0 30px rgba(124, 58, 237, 0.25);
-}
-
-.archive-player video {
-  width: 100%;
-  max-height: 60vh;
-  display: block;
-}
-
-.btn-small {
-  padding: 6px 10px;
-  border: none;
-  border-radius: 8px;
-  background: var(--grad);
-  color: #ffffff;
-  font-family: var(--font-body);
-  font-size: 0.85rem;
-  font-weight: 600;
-  cursor: pointer;
-  margin-right: 8px;
-  transition: filter 0.2s;
-}
-
-.btn-small:hover:not(:disabled) {
-  filter: brightness(1.12);
-}
-
-.btn-small:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-.btn-secondary {
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid var(--border);
-}
-
-/* ---------- Бейдж сегмента, сохранённого по движению ---------- */
-
-.kept-badge {
-  display: inline-block;
-  padding: 3px 10px;
-  border-radius: 999px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: #67e8f9;
-  background: rgba(6, 182, 212, 0.15);
-  border: 1px solid rgba(6, 182, 212, 0.45);
-  box-shadow: 0 0 10px rgba(6, 182, 212, 0.35);
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.kept-empty {
+.archive-link {
+  justify-self: end;
+  padding: 6px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(103, 232, 249, 0.4);
+  background: rgba(103, 232, 249, 0.08);
+  color: #67e8f9;
+  font-size: 0.8rem;
+  text-decoration: none;
+  transition: background 0.2s, box-shadow 0.2s;
+}
+
+.archive-link:hover {
+  background: rgba(103, 232, 249, 0.16);
+  box-shadow: 0 0 10px rgba(103, 232, 249, 0.3);
+}
+
+.archive-empty {
+  padding: 26px;
+  text-align: center;
   color: var(--muted);
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+}
+
+@media (max-width: 800px) {
+  .archive-header {
+    display: none;
+  }
+
+  .archive-row {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .archive-link {
+    justify-self: start;
+  }
+}
+
+/* ---------- Кнопка «Открыть» как кнопка, а не ссылка ---------- */
+
+button.archive-link {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+button.archive-link:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ---------- Плеер-модалка клипа ---------- */
+
+.archive-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(4, 4, 10, 0.82);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.archive-modal-box {
+  width: min(1100px, 94vw);
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: #0b0b12;
+  overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+}
+
+.archive-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+.archive-modal-close {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 8px;
+  transition: color 0.2s, background 0.2s;
+}
+
+.archive-modal-close:hover {
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.12);
+}
+
+.archive-modal-video {
+  display: block;
+  width: 100%;
+  max-height: 76vh;
+  background: #000000;
 }

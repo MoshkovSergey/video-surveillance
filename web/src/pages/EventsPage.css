@@ -1,44 +1,83 @@
-.severity-badge {
-  display: inline-block;
-  padding: 4px 10px;
-  border-radius: 999px;
-  font-size: 0.8rem;
+/* ---------- Таблица архива клипов ---------- */
+
+.archive-table {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.archive-header,
+.archive-row {
+  display: grid;
+  grid-template-columns: 1.1fr 0.7fr 0.7fr 1fr 0.7fr;
+  gap: 14px;
+  align-items: center;
+  padding: 10px 16px;
+}
+
+.archive-header {
+  color: var(--muted);
+  font-size: 0.72rem;
   font-weight: 600;
-  border: 1px solid;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
 }
 
-.sev-info {
-  color: #67e8f9;
-  border-color: rgba(6, 182, 212, 0.5);
-  background: rgba(6, 182, 212, 0.12);
-  box-shadow: 0 0 12px rgba(6, 182, 212, 0.25);
+.archive-row {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--glass);
+  font-size: 0.88rem;
+  color: var(--text);
+  transition: border-color 0.2s, background 0.2s;
 }
 
-.sev-warning {
-  color: #fcd34d;
-  border-color: rgba(245, 158, 11, 0.5);
-  background: rgba(245, 158, 11, 0.12);
-  box-shadow: 0 0 12px rgba(245, 158, 11, 0.25);
+.archive-row:hover {
+  border-color: var(--border-accent);
+  background: rgba(255, 255, 255, 0.06);
 }
 
-.sev-critical {
-  color: #fca5a5;
-  border-color: rgba(239, 68, 68, 0.55);
-  background: rgba(239, 68, 68, 0.14);
-  box-shadow: 0 0 14px rgba(239, 68, 68, 0.35);
-}
-
-.event-details {
-  color: var(--muted);
-  font-size: 0.85rem;
-  white-space: nowrap;
-}
-
-.event-note {
-  color: var(--muted);
-  font-size: 0.85rem;
-  max-width: 240px;
+.archive-row span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.archive-link {
+  justify-self: end;
+  padding: 6px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(103, 232, 249, 0.4);
+  background: rgba(103, 232, 249, 0.08);
+  color: #67e8f9;
+  font-size: 0.8rem;
+  text-decoration: none;
+  transition: background 0.2s, box-shadow 0.2s;
+}
+
+.archive-link:hover {
+  background: rgba(103, 232, 249, 0.16);
+  box-shadow: 0 0 10px rgba(103, 232, 249, 0.3);
+}
+
+.archive-empty {
+  padding: 26px;
+  text-align: center;
+  color: var(--muted);
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+}
+
+@media (max-width: 800px) {
+  .archive-header {
+    display: none;
+  }
+
+  .archive-row {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .archive-link {
+    justify-self: start;
+  }
 }

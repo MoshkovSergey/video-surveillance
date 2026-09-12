@@ -1,228 +1,122 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getCameras, getRecordingBlob, getRecordings } from '../api/client';
 import { useToast } from '../components/Toast';
+import Pagination from '../components/Pagination';
 import type { Recording } from '../types/recording';
 import './ArchivePage.css';
 
-function formatBytes(size: number): string {
-  if (size >= 1024 ** 3) return `${(size / 1024 ** 3).toFixed(1)} ГБ`;
-  if (size >= 1024 ** 2) return `${(size / 1024 ** 2).toFixed(1)} МБ`;
-  if (size >= 1024) return `${(size / 1024).toFixed(1)} КБ`;
-  return `${size} Б`;
-}
+const PAGE_SIZE = 20;
 
-function formatDateTime(iso: string): string {
-  return new Date(iso).toLocaleString();
-}
-
-function formatDuration(rec: Recording): string {
-  if (!rec.ended_at) return '—';
-  const sec = Math.max(
-    0,
-    Math.round((new Date(rec.ended_at).getTime() - new Date(rec.started_at).getTime()) / 1000),
-  );
-  const min = Math.floor(sec / 60);
-  const s = sec % 60;
-  return `${min} мин ${s} с`;
-}
-
-function todayLocal(): string {
-  const d = new Date();
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
+const fmtRec = (rec: Recording) => {
+  const start = new Date(rec.started_at).toLocaleString('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+  const end = rec.ended_at
+    ? new Date(rec.ended_at).toLocaleTimeString('ru-RU', {
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : '—';
+  const size = rec.size_bytes ? `${(rec.size_bytes / 1024 / 1024).toFixed(1)} МБ` : '—';
+  return { start, end, size };
+};
 
 export default function ArchivePage() {
   const notify = useToast();
-  const [cameraId, setCameraId] = useState('');
-  const [date, setDate] = useState(todayLocal);
-  const [selected, setSelected] = useState<Recording | null>(null);
-  const [playerUrl, setPlayerUrl] = useState<string | null>(null);
-  const [loadingFile, setLoadingFile] = useState(false);
+  const [page, setPage] = useState(1);
+  const [opening, setOpening] = useState<string | null>(null);
+  const [playing, setPlaying] = useState<{ url: string; title: string } | null>(null);
+  const offset = (page - 1) * PAGE_SIZE;
 
-  const { data: cameras } = useQuery({
-    queryKey: ['cameras'],
-    queryFn: getCameras,
+  const { data: cameras } = useQuery({ queryKey: ['cameras'], queryFn: getCameras });
+  const camName = (id: string) => (cameras ?? []).find((c) => c.id === id)?.name ?? id;
+
+  const { data: recordings, isLoading } = useQuery({
+    queryKey: ['recordings-archive', page],
+    queryFn: () => getRecordings({ kept: true, limit: PAGE_SIZE + 1, offset }),
   });
 
-  const { from, to } = useMemo(() => {
-    if (!date) return { from: undefined, to: undefined };
-    return {
-      from: new Date(`${date}T00:00:00`).toISOString(),
-      to: new Date(`${date}T23:59:59`).toISOString(),
-    };
-  }, [date]);
+  const hasMore = (recordings ?? []).length > PAGE_SIZE;
+  const visible = (recordings ?? []).slice(0, PAGE_SIZE);
+  const totalPages = hasMore ? page + 1 : page;
 
-  // Клипы из storage/clips; опрос каждые 10 с, чтобы список совпадал с диском.
-  const { data: recordings, isLoading, isError, dataUpdatedAt } = useQuery({
-    queryKey: ['archive-clips', cameraId, date],
-    queryFn: () =>
-      getRecordings({
-        camera_id: cameraId || undefined,
-        from,
-        to,
-        kept: true,
-      }),
-    refetchInterval: 10_000,
-    refetchOnWindowFocus: true,
-  });
-
-  const clipCount = recordings?.length ?? 0;
-
-  const cameraName = (id: string): string =>
-    cameras?.find((c) => c.id === id)?.name ?? id;
-
-  const releasePlayerUrl = () => {
-    if (playerUrl) {
-      URL.revokeObjectURL(playerUrl);
-      setPlayerUrl(null);
-    }
-  };
-
-  useEffect(() => () => releasePlayerUrl(), []);
-
-  const handleWatch = async (rec: Recording) => {
-    setLoadingFile(true);
-    try {
-      const blob = await getRecordingBlob(rec.id);
-      releasePlayerUrl();
-      setPlayerUrl(URL.createObjectURL(blob));
-      setSelected(rec);
-    } catch (error) {
-      notify('error', (error as Error).message);
-    } finally {
-      setLoadingFile(false);
-    }
-  };
-
-  const handleDownload = async (rec: Recording) => {
-    setLoadingFile(true);
+  // Загрузка клипа через авторизованный запрос и показ во встроенном плеере.
+  const openRec = async (rec: Recording) => {
+    setOpening(rec.id);
     try {
       const blob = await getRecordingBlob(rec.id);
       const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `${rec.started_at.replace(/[:.]/g, '-')}.mp4`;
-      link.click();
-      URL.revokeObjectURL(url);
-    } catch (error) {
-      notify('error', (error as Error).message);
+      const { start } = fmtRec(rec);
+      setPlaying({ url, title: `${camName(rec.camera_id)} • ${start}` });
+    } catch (e) {
+      notify('error', (e as Error).message);
     } finally {
-      setLoadingFile(false);
+      setOpening(null);
     }
   };
 
-  const handlePlayerError = () => {
-    notify('error', 'Файл клипа отсутствует на диске');
+  const closePlayer = () => {
+    setPlaying((p) => {
+      if (p) URL.revokeObjectURL(p.url);
+      return null;
+    });
   };
 
   return (
     <div className="container">
-      <div className="archive-header">
-        <h1>Архив клипов</h1>
-        <div className="archive-count" title={dataUpdatedAt ? `Обновлено: ${new Date(dataUpdatedAt).toLocaleTimeString()}` : undefined}>
-          На диске: <strong>{isLoading && recordings === undefined ? '…' : clipCount}</strong>
+      <h1>Архив клипов</h1>
+
+      {isLoading && <div className="loading">Загрузка...</div>}
+
+      <div className="archive-table">
+        <div className="archive-header">
+          <span>Начало</span>
+          <span>Конец</span>
+          <span>Размер</span>
+          <span>Камера</span>
+          <span></span>
         </div>
+        {visible.map((rec) => {
+          const { start, end, size } = fmtRec(rec);
+          return (
+            <div key={rec.id} className="archive-row">
+              <span>{start}</span>
+              <span>{end}</span>
+              <span>{size}</span>
+              <span>{camName(rec.camera_id)}</span>
+              <button
+                className="archive-link"
+                disabled={opening === rec.id}
+                onClick={() => openRec(rec)}
+              >
+                {opening === rec.id ? 'Загрузка...' : 'Открыть'}
+              </button>
+            </div>
+          );
+        })}
+        {!isLoading && visible.length === 0 && (
+          <div className="archive-empty">Клипов пока нет</div>
+        )}
       </div>
 
-      <div className="archive-controls">
-        <label>
-          Камера
-          <select
-            value={cameraId}
-            onChange={(e) => {
-              setCameraId(e.target.value);
-              setSelected(null);
-              releasePlayerUrl();
-            }}
-          >
-            <option value="">Все камеры</option>
-            {cameras?.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-        </label>
+      <Pagination current={page} total={totalPages} onPage={setPage} />
 
-        <label>
-          Дата
-          <input
-            type="date"
-            value={date}
-            onChange={(e) => {
-              setDate(e.target.value);
-              setSelected(null);
-              releasePlayerUrl();
-            }}
-          />
-        </label>
-      </div>
-
-      {selected && playerUrl && (
-        <div className="archive-player">
-          <video
-            key={selected.id}
-            controls
-            autoPlay
-            muted
-            playsInline
-            src={playerUrl}
-            onError={handlePlayerError}
-          />
+      {playing && (
+        <div className="archive-modal" onClick={closePlayer}>
+          <div className="archive-modal-box" onClick={(e) => e.stopPropagation()}>
+            <div className="archive-modal-header">
+              <span>{playing.title}</span>
+              <button className="archive-modal-close" onClick={closePlayer} title="Закрыть">
+                ✕
+              </button>
+            </div>
+            <video src={playing.url} controls autoPlay className="archive-modal-video" />
+          </div>
         </div>
-      )}
-
-      {isLoading && recordings === undefined && <div className="loading">Загрузка архива...</div>}
-      {isError && <div className="error">Ошибка загрузки архива</div>}
-
-      {recordings && recordings.length === 0 && !isLoading && (
-        <div className="loading">Клипов за выбранный день нет</div>
-      )}
-
-      {recordings && recordings.length > 0 && (
-        <table className="camera-table">
-          <thead>
-            <tr>
-              <th>Камера</th>
-              <th>Начало</th>
-              <th>Длительность</th>
-              <th>Размер</th>
-              <th>Метка</th>
-              <th>Действия</th>
-            </tr>
-          </thead>
-          <tbody>
-            {recordings.map((rec) => (
-              <tr key={rec.id} className={selected?.id === rec.id ? 'archive-row-active' : undefined}>
-                <td>{cameraName(rec.camera_id)}</td>
-                <td>{formatDateTime(rec.started_at)}</td>
-                <td>{formatDuration(rec)}</td>
-                <td>{formatBytes(rec.size_bytes)}</td>
-                <td>
-                  <span className="kept-badge">по движению</span>
-                </td>
-                <td>
-                  <button
-                    className="btn-small"
-                    disabled={loadingFile}
-                    onClick={() => handleWatch(rec)}
-                  >
-                    Смотреть
-                  </button>
-                  <button
-                    className="btn-small btn-secondary"
-                    disabled={loadingFile}
-                    onClick={() => handleDownload(rec)}
-                  >
-                    Скачать
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
       )}
     </div>
   );

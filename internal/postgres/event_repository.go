@@ -53,29 +53,24 @@ func (r *EventRepository) Create(ctx context.Context, ev *domain.Event) error {
 // Пустые строковые фильтры нормализуются в NULL:
 // в SQL пустая строка не равна NULL и иначе фильтр отбросил бы все строки.
 // Колонка type имеет enum-тип event_type, поэтому сравнение через type::text.
-func (r *EventRepository) List(
-	ctx context.Context,
-	cameraID *uuid.UUID,
-	eventType string,
-	from, to *time.Time,
-	limit int,
-) ([]domain.Event, error) {
-	var typeParam any
-	if eventType != "" {
-		typeParam = eventType
+func (r *EventRepository) List(ctx context.Context, cameraID *uuid.UUID, typ *domain.EventType, from, to *time.Time, limit, offset int) ([]domain.Event, error) {
+	if limit <= 0 {
+		limit = 200
 	}
-
+	if offset < 0 {
+		offset = 0
+	}
 	query := `
-		SELECT id, camera_id, type, severity, occurred_at, payload, created_at
+		SELECT id, camera_id, type, payload, occurred_at
 		FROM events
 		WHERE ($1::uuid IS NULL OR camera_id = $1)
-		  AND ($2::text IS NULL OR type::text = $2)
+		  AND ($2::text IS NULL OR type = $2)
 		  AND ($3::timestamptz IS NULL OR occurred_at >= $3)
 		  AND ($4::timestamptz IS NULL OR occurred_at <= $4)
 		ORDER BY occurred_at DESC
-		LIMIT $5
+		LIMIT $5 OFFSET $6
 	`
-	rows, err := r.pool.Query(ctx, query, cameraID, typeParam, from, to, limit)
+	rows, err := r.pool.Query(ctx, query, cameraID, typ, from, to, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("query events: %w", err)
 	}
