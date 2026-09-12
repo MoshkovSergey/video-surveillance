@@ -16,6 +16,7 @@ import (
 
 	"gitverse.ru/cataclysm78/video-surveillance/internal/clipper"
 	"gitverse.ru/cataclysm78/video-surveillance/internal/domain"
+	"gitverse.ru/cataclysm78/video-surveillance/internal/notify"
 	"gitverse.ru/cataclysm78/video-surveillance/internal/postgres"
 )
 
@@ -36,6 +37,7 @@ type Scanner struct {
 	repo       *postgres.RecordingRepository
 	cameraRepo *postgres.CameraRepository
 	jobRepo    *postgres.ClipJobRepository
+	notifier   *notify.Notifier
 	root       string
 	relBase    string
 	interval   time.Duration
@@ -50,6 +52,7 @@ func NewScanner(
 	repo *postgres.RecordingRepository,
 	cameraRepo *postgres.CameraRepository,
 	jobRepo *postgres.ClipJobRepository,
+	notifier *notify.Notifier,
 	root string,
 	interval time.Duration,
 	logger *slog.Logger,
@@ -60,6 +63,7 @@ func NewScanner(
 		repo:       repo,
 		cameraRepo: cameraRepo,
 		jobRepo:    jobRepo,
+		notifier:   notifier,
 		root:       root,
 		relBase:    filepath.ToSlash(filepath.Clean(storageDir)),
 		interval:   interval,
@@ -133,14 +137,17 @@ func (s *Scanner) scan(ctx context.Context) {
 		existing = append(existing, paths...)
 	}
 
-	// Ротация буфера режима «по движению»: храним 3 последних сегмента.
+	// ВАЖНО: сначала обрабатываем задачи кадрирования,
+	// только потом ротируем буфер — чтобы сегмент не был удалён
+	// раньше, чем из него вырежут клип.
+	s.processClipJobs(ctx)
+
+	// Ротация буфера режима «по движению»: храним 3 последних сегмента,
+	// но защищаем сегменты, нужные для pending-задач клипов.
 	s.cleanupMotionBuffers(ctx)
 
 	// Очистка старых снимков движения.
 	s.pruneSnapshots()
-
-	// Кадрирование точных фрагментов по эпизодам движения.
-	s.processClipJobs(ctx)
 
 	if scanFailed {
 		s.logger.Warn("skipping recordings prune due to scan errors")
@@ -166,7 +173,7 @@ func (s *Scanner) processClipJobs(ctx context.Context) {
 	}
 
 	for _, job := range jobs {
-		open, err := s.recOpenOverlapping(ctx, job)
+		open, err := s.repo.HasOpenOverlapping(ctx, job.CameraID, job.WindowStart, job.WindowEnd)
 		if err != nil {
 			s.logger.Error("clip job: open segment check failed", "job_id", job.ID, "error", err)
 			continue
@@ -176,21 +183,38 @@ func (s *Scanner) processClipJobs(ctx context.Context) {
 			continue
 		}
 
-		segs, err := s.repo.ListOverlappingClosed(ctx, job.CameraID, job.WindowStart, job.WindowEnd)
+		segs, err := s.repo.ListSourceSegments(ctx, job.CameraID, job.WindowStart, job.WindowEnd)
 		if err != nil {
-			s.logger.Error("clip job: failed to list segments", "job_id", job.ID, "error", err)
+			s.logger.Error("clip job: failed to list source segments", "job_id", job.ID, "error", err)
 			continue
 		}
 		if len(segs) == 0 {
 			if time.Since(job.CreatedAt) > clipJobTTL {
 				_ = s.jobRepo.SetStatus(ctx, job.ID, "failed", "covering segments not found")
+
+				s.notifier.NotifyMotionFallback(ctx, notify.MotionClipInfo{
+					CameraID:    job.CameraID,
+					SnapshotRel: job.SnapshotRel,
+					WindowStart: job.WindowStart,
+					WindowEnd:   job.WindowEnd,
+					DurationSec: int(job.WindowEnd.Sub(job.WindowStart).Seconds()),
+				}, "сегменты эпизода не найдены в буфере")
 			}
 			continue
 		}
 
-		if err := s.buildClips(ctx, job, segs); err != nil {
+		firstClip, err := s.buildClips(ctx, job, segs)
+		if err != nil {
 			s.logger.Error("clip job failed", "job_id", job.ID, "error", err)
 			_ = s.jobRepo.SetStatus(ctx, job.ID, "failed", err.Error())
+
+			s.notifier.NotifyMotionFallback(ctx, notify.MotionClipInfo{
+				CameraID:    job.CameraID,
+				SnapshotRel: job.SnapshotRel,
+				WindowStart: job.WindowStart,
+				WindowEnd:   job.WindowEnd,
+				DurationSec: int(job.WindowEnd.Sub(job.WindowStart).Seconds()),
+			}, err.Error())
 			continue
 		}
 
@@ -200,19 +224,40 @@ func (s *Scanner) processClipJobs(ctx context.Context) {
 			"window_start", job.WindowStart.Format(time.RFC3339),
 			"window_end", job.WindowEnd.Format(time.RFC3339),
 		)
+
+		// Клип готов и в архиве — отправляем видео в Telegram.
+		s.notifier.NotifyMotionClip(ctx, notify.MotionClipInfo{
+			CameraID:    job.CameraID,
+			ClipRel:     firstClip,
+			SnapshotRel: job.SnapshotRel,
+			WindowStart: job.WindowStart,
+			WindowEnd:   job.WindowEnd,
+			DurationSec: int(job.WindowEnd.Sub(job.WindowStart).Seconds()),
+		})
 	}
 }
 
-func (s *Scanner) recOpenOverlapping(ctx context.Context, job domain.ClipJob) (bool, error) {
-	return s.repo.HasOpenOverlapping(ctx, job.CameraID, job.WindowStart, job.WindowEnd)
-}
+// buildClips вырезает по одному клипу из каждого покрывающего сегмента
+// и возвращает относительный путь первого клипа.
+func (s *Scanner) buildClips(ctx context.Context, job domain.ClipJob, segs []domain.Recording) (string, error) {
+	firstClip := ""
 
-// buildClips вырезает по одному клипу из каждого покрывающего сегмента.
-func (s *Scanner) buildClips(ctx context.Context, job domain.ClipJob, segs []domain.Recording) error {
 	for _, seg := range segs {
 		if seg.EndedAt == nil {
 			continue
 		}
+
+		// Источник должен реально существовать и быть непустым.
+		// StoragePath хранится относительно рабочего каталога процесса
+		// (например, "storage/recordings/..."), префикс добавлять не нужно.
+		srcHost := filepath.FromSlash(seg.StoragePath)
+		if fi, err := os.Stat(srcHost); err != nil || fi.Size() == 0 {
+			s.logger.Warn("clip job: source segment missing or empty",
+				"path", seg.StoragePath,
+			)
+			continue
+		}
+
 		segStart := seg.StartedAt
 		segEnd := *seg.EndedAt
 
@@ -236,17 +281,44 @@ func (s *Scanner) buildClips(ctx context.Context, job domain.ClipJob, segs []dom
 		hostClip := filepath.Join(s.relBase, filepath.FromSlash(clipRel))
 
 		if err := os.MkdirAll(filepath.Dir(hostClip), 0o755); err != nil {
-			return err
+			return "", err
 		}
 
 		segRel := strings.TrimPrefix(seg.StoragePath, s.relBase+"/")
+
+		// Никогда не режем файл из самого себя.
+		if segRel == clipRel {
+			continue
+		}
+
+		// Клип уже вырезан ранее — переиспользуем его и убеждаемся,
+		// что метаданные присутствуют в архиве.
+		if fi, err := os.Stat(hostClip); err == nil && fi.Size() > 0 {
+			ended := winEnd
+			rec := &domain.Recording{
+				CameraID:    job.CameraID,
+				StartedAt:   winStart,
+				EndedAt:     &ended,
+				StoragePath: filepath.ToSlash(hostClip),
+				SizeBytes:   fi.Size(),
+				Kept:        true,
+			}
+			if err := s.repo.InsertKept(ctx, rec); err != nil {
+				return "", err
+			}
+			if firstClip == "" {
+				firstClip = clipRel
+			}
+			continue
+		}
+
 		if err := s.clip.Cut(ctx, segRel, offset, duration, clipRel); err != nil {
-			return err
+			return "", err
 		}
 
 		info, err := os.Stat(hostClip)
 		if err != nil {
-			return err
+			return "", err
 		}
 
 		ended := winEnd
@@ -259,14 +331,24 @@ func (s *Scanner) buildClips(ctx context.Context, job domain.ClipJob, segs []dom
 			Kept:        true,
 		}
 		if err := s.repo.InsertKept(ctx, rec); err != nil {
-			return err
+			return "", err
+		}
+
+		if firstClip == "" {
+			firstClip = clipRel
 		}
 	}
-	return nil
+
+	if firstClip == "" {
+		return "", errors.New("no clip produced")
+	}
+	return firstClip, nil
 }
 
 // cleanupMotionBuffers удаляет сегменты буфера сверх лимита keepBufferSegments.
 // Помеченные kept (клипы и эпизоды) не удаляются никогда.
+// Сегменты, нужные для pending-задач клипов, НЕ удаляются — иначе
+// задача не сможет вырезать клип и перейдёт в failed.
 func (s *Scanner) cleanupMotionBuffers(ctx context.Context) {
 	cams, err := s.cameraRepo.List(ctx)
 	if err != nil {
@@ -290,7 +372,24 @@ func (s *Scanner) cleanupMotionBuffers(ctx context.Context) {
 		}
 
 		deleted := 0
+		skipped := 0
 		for _, row := range rows[keepBufferSegments:] {
+			// Проверяем, не покрывает ли сегмент какая-то pending-задача клипа.
+			segEnd := *row.EndedAt
+			needed, err := s.jobRepo.HasPendingJobOverlapping(ctx, cam.ID, row.StartedAt, segEnd)
+			if err != nil {
+				s.logger.Error("cleanup: pending job check failed",
+					"recording_id", row.ID,
+					"error", err,
+				)
+				continue
+			}
+			if needed {
+				// Сегмент ещё нужен для кадрирования — оставляем.
+				skipped++
+				continue
+			}
+
 			if err := os.Remove(row.StoragePath); err != nil && !os.IsNotExist(err) {
 				s.logger.Error("failed to remove buffer file",
 					"path", row.StoragePath,
@@ -308,13 +407,51 @@ func (s *Scanner) cleanupMotionBuffers(ctx context.Context) {
 			deleted++
 		}
 
-		if deleted > 0 {
-			s.logger.Info("motion buffer trimmed to last segments",
+		if deleted > 0 || skipped > 0 {
+			s.logger.Info("motion buffer trimmed",
 				"camera_id", cam.ID,
 				"kept", keepBufferSegments,
 				"deleted", deleted,
+				"skipped_for_pending_clips", skipped,
 			)
 		}
+	}
+}
+
+// pruneSnapshots удаляет снимки движения старше 7 суток.
+func (s *Scanner) pruneSnapshots() {
+	root := filepath.Join(filepath.Dir(s.root), "snapshots")
+	camDirs, err := os.ReadDir(root)
+	if err != nil {
+		return
+	}
+
+	cutoff := time.Now().Add(-7 * 24 * time.Hour)
+	deleted := 0
+
+	for _, dir := range camDirs {
+		if !dir.IsDir() {
+			continue
+		}
+		files, err := os.ReadDir(filepath.Join(root, dir.Name()))
+		if err != nil {
+			continue
+		}
+		for _, f := range files {
+			info, err := f.Info()
+			if err != nil || info.IsDir() {
+				continue
+			}
+			if info.ModTime().Before(cutoff) {
+				if err := os.Remove(filepath.Join(root, dir.Name(), f.Name())); err == nil {
+					deleted++
+				}
+			}
+		}
+	}
+
+	if deleted > 0 {
+		s.logger.Info("motion snapshots pruned", "deleted", deleted)
 	}
 }
 
@@ -398,41 +535,4 @@ func isForeignKeyViolation(err error) bool {
 		return pgErr.Code == "23503"
 	}
 	return false
-}
-
-// pruneSnapshots удаляет снимки движения старше 7 суток.
-func (s *Scanner) pruneSnapshots() {
-	root := filepath.Join(filepath.Dir(s.root), "snapshots")
-	camDirs, err := os.ReadDir(root)
-	if err != nil {
-		return
-	}
-
-	cutoff := time.Now().Add(-7 * 24 * time.Hour)
-	deleted := 0
-
-	for _, dir := range camDirs {
-		if !dir.IsDir() {
-			continue
-		}
-		files, err := os.ReadDir(filepath.Join(root, dir.Name()))
-		if err != nil {
-			continue
-		}
-		for _, f := range files {
-			info, err := f.Info()
-			if err != nil || info.IsDir() {
-				continue
-			}
-			if info.ModTime().Before(cutoff) {
-				if err := os.Remove(filepath.Join(root, dir.Name(), f.Name())); err == nil {
-					deleted++
-				}
-			}
-		}
-	}
-
-	if deleted > 0 {
-		s.logger.Info("motion snapshots pruned", "deleted", deleted)
-	}
 }

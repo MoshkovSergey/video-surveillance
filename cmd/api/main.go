@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -27,13 +28,30 @@ import (
 )
 
 func main() {
-	// Загружаем .env локально, если он есть.
-	_ = godotenv.Load()
+	loadEnv()
 
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	if err := run(ctx); err != nil {
+		slog.Error("application stopped with error", "error", err)
+		os.Exit(1)
+	}
+}
+
+// loadEnv читает .env сначала рядом с исполняемым файлом, затем из CWD.
+func loadEnv() {
+	if exe, err := os.Executable(); err == nil {
+		_ = godotenv.Load(filepath.Join(filepath.Dir(exe), ".env"))
+	}
+	_ = godotenv.Load()
+}
+
+func run(ctx context.Context) error {
 	cfg, err := config.Load()
 	if err != nil {
-		slog.Error("failed to load config", "error", err)
-		os.Exit(1)
+		return err
 	}
 
 	logger := newLogger(cfg)
@@ -43,13 +61,11 @@ func main() {
 		logger.Warn("JWT_SECRET uses development default; change it before production use")
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	pool, err := postgres.NewPool(ctx, cfg.DatabaseURL)
 	if err != nil {
 		logger.Error("failed to connect to postgres", "error", err)
-		os.Exit(1)
+		return err
 	}
 	defer pool.Close()
 
@@ -60,28 +76,43 @@ func main() {
 	eventRepo := postgres.NewEventRepository(pool)
 	userRepo := postgres.NewUserRepository(pool)
 	clipJobRepo := postgres.NewClipJobRepository(pool)
+	settingsRepo := postgres.NewSettingsRepository(pool)
+
 	media := mediamtx.NewClient(cfg.MediaMTXAPIURL)
 	tokens := auth.NewTokenService(cfg.JWTSecret, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
 
 	if err := seedAdmin(ctx, userRepo, cfg, logger); err != nil {
 		logger.Error("failed to seed admin user", "error", err)
-		os.Exit(1)
+		return err
 	}
 
 	syncMediaPaths(ctx, cameraRepo, media, logger)
 
-	// Фоновый сканер: синхронизация сегментов, ротация буфера, кадрирование клипов.
+	// Отправитель уведомлений в Telegram по событиям журнала.
+	// Создается ДО scanner, так как scanner использует его для отправки видео.
+	notifier := notify.NewNotifier(
+		eventRepo,
+		cameraRepo,
+		settingsRepo,
+		logger,
+		10*time.Second,
+		cfg.StoragePath,
+	)
+	notifier.Start(ctx)
+
+	// Сканер записей: синхронизация, ротация, кадрирование, отправка видео.
 	scanner := recorder.NewScanner(
 		recordingRepo,
 		cameraRepo,
 		clipJobRepo,
+		notifier,
 		filepath.Join(cfg.StoragePath, "recordings"),
 		30*time.Second,
 		logger,
 	)
 	scanner.Start(ctx)
 
-	// Фоновый монитор состояния камер (онлайн/офлайн).
+	// Монитор доступности камер.
 	mon := monitor.NewMonitor(media, cameraRepo, eventRepo, 10*time.Second, logger)
 	mon.Start(ctx)
 
@@ -89,43 +120,56 @@ func main() {
 	motionMgr := motion.NewManager(cameraRepo, eventRepo, clipJobRepo, clipper.New(cfg.StoragePath), logger)
 	motionMgr.Start(ctx)
 
-	// Отправитель уведомлений в Telegram по событиям журнала.
-	settingsRepo := postgres.NewSettingsRepository(pool)
-	notifier := notify.NewNotifier(eventRepo, cameraRepo, settingsRepo, logger, 10*time.Second, cfg.StoragePath)
-	notifier.Start(ctx)
+	// HTTP API и встроенный веб-интерфейс.
+	api := httpapi.NewHandler(pool, cameraRepo, recordingRepo, eventRepo, userRepo, media, tokens, logger)
+	
 
-	handler := httpapi.NewHandler(pool, cameraRepo, recordingRepo, eventRepo, userRepo, media, tokens, logger)
+	final := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/healthz") {
+			api.ServeHTTP(w, r)
+			return
+		}
+		
+	})
 
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           handler,
+		Handler:           final,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
 
+	errCh := make(chan error, 1)
 	go func() {
 		logger.Info("api server starting", "addr", cfg.HTTPAddr)
-
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Error("api server stopped unexpectedly", "error", err)
-			stop()
+			errCh <- err
 		}
 	}()
 
-	<-ctx.Done()
-
-	logger.Info("shutdown signal received")
-
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
-	defer cancel()
-
-	if err := server.Shutdown(shutdownCtx); err != nil {
-		logger.Error("server shutdown error", "error", err)
+	select {
+	case <-ctx.Done():
+		logger.Info("shutdown signal received")
+	case err := <-errCh:
+		logger.Error("api server stopped unexpectedly", "error", err)
+		shutdown(server, cfg, logger)
+		return err
 	}
 
+	shutdown(server, cfg, logger)
 	logger.Info("server stopped")
+	return nil
+}
+
+func shutdown(server *http.Server, cfg config.Config, logger *slog.Logger) {
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
+	defer cancel()
+
+	if err := server.Shutdown(ctx); err != nil {
+		logger.Error("server shutdown error", "error", err)
+	}
 }
 
 // seedAdmin создает первого администратора при пустой таблице users.

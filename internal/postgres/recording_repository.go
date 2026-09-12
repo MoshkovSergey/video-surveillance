@@ -144,6 +144,42 @@ func (r *RecordingRepository) ListOverlappingClosed(ctx context.Context, cameraI
 	return recordings, nil
 }
 
+// ListSourceSegments возвращает закрытые буферные сегменты (kept = false),
+// пересекающие окно [from, to]: только они могут быть источником кадрирования.
+func (r *RecordingRepository) ListSourceSegments(ctx context.Context, cameraID uuid.UUID, from, to time.Time) ([]domain.Recording, error) {
+	query := `
+		SELECT id, camera_id, started_at, ended_at, storage_path, size_bytes, kept, created_at
+		FROM recordings
+		WHERE camera_id = $1
+		  AND kept = false
+		  AND ended_at IS NOT NULL
+		  AND started_at <= $3
+		  AND ended_at >= $2
+		ORDER BY started_at
+	`
+	rows, err := r.pool.Query(ctx, query, cameraID, from, to)
+	if err != nil {
+		return nil, fmt.Errorf("query source segments: %w", err)
+	}
+	defer rows.Close()
+
+	var recordings []domain.Recording
+	for rows.Next() {
+		var rec domain.Recording
+		if err := rows.Scan(
+			&rec.ID, &rec.CameraID, &rec.StartedAt, &rec.EndedAt,
+			&rec.StoragePath, &rec.SizeBytes, &rec.Kept, &rec.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan recording: %w", err)
+		}
+		recordings = append(recordings, rec)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate recordings: %w", err)
+	}
+	return recordings, nil
+}
+
 // HasOpenOverlapping сообщает, есть ли ещё записываемый сегмент,
 // пересекающий окно [from, to]: резать его пока нельзя.
 func (r *RecordingRepository) HasOpenOverlapping(ctx context.Context, cameraID uuid.UUID, from, to time.Time) (bool, error) {

@@ -14,6 +14,7 @@ type ClipJob struct {
 	WindowEnd   time.Time `json:"window_end"`
 	Status      string    `json:"status"` // pending | done | failed
 	Error       string    `json:"error"`
+	SnapshotRel string    `json:"snapshot_rel"` // снимок кадра эпизода (относительно storage)
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
