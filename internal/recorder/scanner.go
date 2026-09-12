@@ -310,15 +310,23 @@ func (s *Scanner) buildMotionClip(
 			continue
 		}
 
-		contentStart, contentEnd, mapErr := s.segmentTimeline(ctx, srcHost, seg.StartedAt, *seg.EndedAt)
-		if mapErr != nil {
-			// Без video-duration нельзя резать: имя файла = старт аудио (~40с раньше).
-			s.logger.Error("clip job: timeline probe required but failed",
-				"path", srcHost,
-				"error", mapErr,
-			)
-			continue
+		// Истинное начало содержимого: время создания файла.
+		// Допускаем его только в правдоподобном диапазоне [имя, конец сегмента).
+		contentStart := seg.StartedAt
+		contentEnd := *seg.EndedAt
+
+		if ct, ok := fileCreationTime(srcHost); ok {
+			if !ct.Before(seg.StartedAt) && ct.Before(*seg.EndedAt) {
+				contentStart = ct
+			}
 		}
+
+		s.logger.Info("clip source mapping",
+			"segment", seg.StoragePath,
+			"name_time", seg.StartedAt.Format(time.RFC3339),
+			"content_start", contentStart.Format(time.RFC3339),
+			"delay_sec", fmt.Sprintf("%.1f", contentStart.Sub(seg.StartedAt).Seconds()),
+		)
 
 		// Триггер должен попадать в содержимое сегмента.
 		if triggerAt.Before(contentStart) || !triggerAt.Before(contentEnd) {
@@ -423,76 +431,8 @@ func (s *Scanner) buildMotionClip(
 		triggerAt.In(mskZone).Format("2006-01-02_15-04-05"),
 		job.ID.String()[:8],
 	)
-	if err := s.clip.ExtractFrame(ctx, best.segRel, best.triggerOff, snapRel); err != nil {
-		s.logger.Warn("clip job: extract trigger frame failed, keep live snapshot",
-			"error", err,
-		)
-		snapRel = job.SnapshotRel
-	}
 
 	return clipRel, snapRel, nil
-}
-
-// segmentTimeline оценивает окно ВИДЕО-содержимого.
-// Имя файла MediaMTX ≈ старт аудио; первый кадр ≈ nameTime + (formatDur − videoDur)
-// или nextName − videoDuration.
-func (s *Scanner) segmentTimeline(
-	ctx context.Context,
-	srcHost string,
-	nameTime, nextNameTime time.Time,
-) (contentStart, contentEnd time.Time, err error) {
-	probe, err := s.clip.Probe(ctx, srcHost)
-	if err != nil {
-		return time.Time{}, time.Time{}, err
-	}
-	videoDur := probe.ContentDuration()
-	if videoDur < time.Second {
-		return time.Time{}, time.Time{}, fmt.Errorf("video duration too small")
-	}
-
-	audioLead := probe.FormatDuration - videoDur
-	if audioLead < 0 {
-		audioLead = 0
-	}
-
-	// Предпочтительно: старт видео = открытие файла + опережение аудио.
-	if audioLead > 2*time.Second {
-		contentStart = nameTime.Add(audioLead)
-		contentEnd = contentStart.Add(videoDur)
-		if !nextNameTime.IsZero() && absDuration(contentEnd.Sub(nextNameTime)) < 45*time.Second {
-			contentEnd = nextNameTime
-		}
-	} else if !nextNameTime.IsZero() {
-		contentEnd = nextNameTime
-		contentStart = contentEnd.Add(-videoDur)
-	} else {
-		fi, stErr := os.Stat(srcHost)
-		if stErr != nil {
-			return time.Time{}, time.Time{}, stErr
-		}
-		contentEnd = fi.ModTime()
-		contentStart = contentEnd.Add(-videoDur)
-	}
-
-	if contentStart.Before(nameTime) {
-		contentStart = nameTime
-		contentEnd = contentStart.Add(videoDur)
-	}
-
-	s.logger.Info("segment timeline",
-		"path", srcHost,
-		"name_time", nameTime.Format(time.RFC3339),
-		"video_dur_sec", fmt.Sprintf("%.1f", videoDur.Seconds()),
-		"format_dur_sec", fmt.Sprintf("%.1f", probe.FormatDuration.Seconds()),
-		"audio_lead_sec", fmt.Sprintf("%.1f", audioLead.Seconds()),
-		"content_start", contentStart.Format(time.RFC3339),
-		"content_end", contentEnd.Format(time.RFC3339),
-	)
-
-	if !contentEnd.After(contentStart) {
-		return time.Time{}, time.Time{}, fmt.Errorf("invalid content window")
-	}
-	return contentStart, contentEnd, nil
 }
 
 func absDuration(d time.Duration) time.Duration {
