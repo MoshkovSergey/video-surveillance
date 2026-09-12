@@ -24,6 +24,7 @@ type Handler struct {
 	userRepo      *postgres.UserRepository
 	media         *mediamtx.Client
 	tokens        *auth.TokenService
+	storageRoot   string
 	logger        *slog.Logger
 }
 
@@ -36,6 +37,7 @@ func NewHandler(
 	userRepo *postgres.UserRepository,
 	media *mediamtx.Client,
 	tokens *auth.TokenService,
+	storageRoot string,
 	logger *slog.Logger,
 ) http.Handler {
 	h := &Handler{
@@ -46,6 +48,7 @@ func NewHandler(
 		userRepo:      userRepo,
 		media:         media,
 		tokens:        tokens,
+		storageRoot:   storageRoot,
 		logger:        logger,
 	}
 

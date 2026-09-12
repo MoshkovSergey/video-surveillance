@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getCameras, getRecordingBlob, getRecordings } from '../api/client';
 import { useToast } from '../components/Toast';
@@ -17,7 +17,7 @@ function formatDateTime(iso: string): string {
 }
 
 function formatDuration(rec: Recording): string {
-  if (!rec.ended_at) return 'запись идёт';
+  if (!rec.ended_at) return '—';
   const sec = Math.max(
     0,
     Math.round((new Date(rec.ended_at).getTime() - new Date(rec.started_at).getTime()) / 1000),
@@ -54,10 +54,21 @@ export default function ArchivePage() {
     };
   }, [date]);
 
-  const { data: recordings, isLoading, isError } = useQuery({
-    queryKey: ['recordings', cameraId, date],
-    queryFn: () => getRecordings({ camera_id: cameraId || undefined, from, to }),
+  // Клипы из storage/clips; опрос каждые 10 с, чтобы список совпадал с диском.
+  const { data: recordings, isLoading, isError, dataUpdatedAt } = useQuery({
+    queryKey: ['archive-clips', cameraId, date],
+    queryFn: () =>
+      getRecordings({
+        camera_id: cameraId || undefined,
+        from,
+        to,
+        kept: true,
+      }),
+    refetchInterval: 10_000,
+    refetchOnWindowFocus: true,
   });
+
+  const clipCount = recordings?.length ?? 0;
 
   const cameraName = (id: string): string =>
     cameras?.find((c) => c.id === id)?.name ?? id;
@@ -68,6 +79,8 @@ export default function ArchivePage() {
       setPlayerUrl(null);
     }
   };
+
+  useEffect(() => () => releasePlayerUrl(), []);
 
   const handleWatch = async (rec: Recording) => {
     setLoadingFile(true);
@@ -101,12 +114,17 @@ export default function ArchivePage() {
   };
 
   const handlePlayerError = () => {
-    notify('error', 'Файл записи отсутствует на диске');
+    notify('error', 'Файл клипа отсутствует на диске');
   };
 
   return (
     <div className="container">
-      <h1>Архив записей</h1>
+      <div className="archive-header">
+        <h1>Архив клипов</h1>
+        <div className="archive-count" title={dataUpdatedAt ? `Обновлено: ${new Date(dataUpdatedAt).toLocaleTimeString()}` : undefined}>
+          На диске: <strong>{isLoading && recordings === undefined ? '…' : clipCount}</strong>
+        </div>
+      </div>
 
       <div className="archive-controls">
         <label>
@@ -156,11 +174,11 @@ export default function ArchivePage() {
         </div>
       )}
 
-      {isLoading && <div className="loading">Загрузка архива...</div>}
+      {isLoading && recordings === undefined && <div className="loading">Загрузка архива...</div>}
       {isError && <div className="error">Ошибка загрузки архива</div>}
 
       {recordings && recordings.length === 0 && !isLoading && (
-        <div className="loading">Записей за выбранный день нет</div>
+        <div className="loading">Клипов за выбранный день нет</div>
       )}
 
       {recordings && recordings.length > 0 && (
@@ -177,17 +195,13 @@ export default function ArchivePage() {
           </thead>
           <tbody>
             {recordings.map((rec) => (
-              <tr key={rec.id}>
+              <tr key={rec.id} className={selected?.id === rec.id ? 'archive-row-active' : undefined}>
                 <td>{cameraName(rec.camera_id)}</td>
                 <td>{formatDateTime(rec.started_at)}</td>
                 <td>{formatDuration(rec)}</td>
                 <td>{formatBytes(rec.size_bytes)}</td>
                 <td>
-                  {rec.kept ? (
-                    <span className="kept-badge">по движению</span>
-                  ) : (
-                    <span className="kept-empty">—</span>
-                  )}
+                  <span className="kept-badge">по движению</span>
                 </td>
                 <td>
                   <button

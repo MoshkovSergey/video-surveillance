@@ -3,6 +3,8 @@ package httpapi
 import (
 	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -11,6 +13,7 @@ import (
 )
 
 // handleListRecordings возвращает сегменты архива с фильтрами.
+// kept=true — только клипы из storage/clips (страница «Архив»).
 func (h *Handler) handleListRecordings(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 
@@ -42,21 +45,43 @@ func (h *Handler) handleListRecordings(w http.ResponseWriter, r *http.Request) {
 		to = &t
 	}
 
-	recordings, err := h.recordingRepo.List(r.Context(), cameraID, from, to)
+	var keptFilter *bool
+	switch q.Get("kept") {
+	case "true", "1":
+		v := true
+		keptFilter = &v
+	case "false", "0":
+		v := false
+		keptFilter = &v
+	}
+
+	recordings, err := h.recordingRepo.List(r.Context(), cameraID, from, to, keptFilter)
 	if err != nil {
 		h.logger.Error("failed to list recordings", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
 		return
 	}
-	if recordings == nil {
-		recordings = []domain.Recording{}
+
+	// Отдаём только файлы, которые реально есть на диске.
+	out := make([]domain.Recording, 0, len(recordings))
+	for _, rec := range recordings {
+		host := h.resolveRecordingPath(rec.StoragePath)
+		fi, err := os.Stat(host)
+		if err != nil {
+			if os.IsNotExist(err) && rec.Kept {
+				_ = h.recordingRepo.Delete(r.Context(), rec.ID)
+			}
+			continue
+		}
+		rec.StoragePath = filepath.ToSlash(host)
+		rec.SizeBytes = fi.Size()
+		out = append(out, rec)
 	}
 
-	writeJSON(w, http.StatusOK, recordings)
+	writeJSON(w, http.StatusOK, out)
 }
 
 // handleGetRecordingFile отдает файл сегмента для воспроизведения или скачивания.
-// Перед отдачей проверяет существование файла на диске.
 func (h *Handler) handleGetRecordingFile(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
@@ -75,30 +100,60 @@ func (h *Handler) handleGetRecordingFile(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Проверка существования файла на диске.
-	if _, err := os.Stat(rec.StoragePath); err != nil {
+	host := h.resolveRecordingPath(rec.StoragePath)
+	if _, err := os.Stat(host); err != nil {
 		if os.IsNotExist(err) {
-			// Метаданные устарели: файл удален с диска.
-			// Удаляем строку из базы, чтобы список архива стал консистентным.
 			if delErr := h.recordingRepo.Delete(r.Context(), rec.ID); delErr != nil {
 				h.logger.Error("failed to delete stale recording row",
 					"recording_id", rec.ID,
 					"error", delErr,
 				)
 			}
-
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "recording file not found on disk"})
 			return
 		}
-
-		h.logger.Error("failed to stat recording file",
-			"path", rec.StoragePath,
-			"error", err,
-		)
+		h.logger.Error("failed to stat recording file", "path", host, "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
 		return
 	}
 
 	w.Header().Set("Content-Type", "video/mp4")
-	http.ServeFile(w, r, rec.StoragePath)
+	http.ServeFile(w, r, host)
+}
+
+// resolveRecordingPath приводит путь из БД к абсолютному файлу.
+func (h *Handler) resolveRecordingPath(storagePath string) string {
+	p := filepath.Clean(filepath.FromSlash(storagePath))
+	if filepath.IsAbs(p) {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	if h.storageRoot == "" {
+		return p
+	}
+	candidates := []string{
+		filepath.Join(h.storageRoot, p),
+		p,
+	}
+	slash := filepath.ToSlash(p)
+	if i := strings.Index(slash, "clips/"); i >= 0 {
+		candidates = append(candidates, filepath.Join(h.storageRoot, filepath.FromSlash(slash[i:])))
+	}
+	if i := strings.Index(slash, "recordings/"); i >= 0 {
+		candidates = append(candidates, filepath.Join(h.storageRoot, filepath.FromSlash(slash[i:])))
+	}
+	base := filepath.Base(h.storageRoot)
+	if strings.HasPrefix(slash, base+"/") {
+		candidates = append(candidates, filepath.Join(h.storageRoot, filepath.FromSlash(strings.TrimPrefix(slash, base+"/"))))
+	}
+	for _, c := range candidates {
+		if abs, err := filepath.Abs(c); err == nil {
+			c = abs
+		}
+		if _, err := os.Stat(c); err == nil {
+			return c
+		}
+	}
+	return filepath.Join(h.storageRoot, p)
 }

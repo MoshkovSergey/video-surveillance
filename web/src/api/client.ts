@@ -320,6 +320,8 @@ export async function getRecordings(params: RecordingsQuery = {}): Promise<Recor
   if (params.camera_id) search.set('camera_id', params.camera_id);
   if (params.from) search.set('from', params.from);
   if (params.to) search.set('to', params.to);
+  if (params.kept === true) search.set('kept', 'true');
+  if (params.kept === false) search.set('kept', 'false');
 
   const qs = search.toString();
   const res = await apiFetch(`/recordings${qs ? `?${qs}` : ''}`);

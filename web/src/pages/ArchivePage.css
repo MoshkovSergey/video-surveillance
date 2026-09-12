@@ -1,3 +1,30 @@
+.archive-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.archive-header h1 {
+  margin-bottom: 0;
+}
+
+.archive-count {
+  font-size: 0.95rem;
+  color: var(--muted);
+}
+
+.archive-count strong {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.archive-row-active td {
+  background: rgba(124, 58, 237, 0.12);
+}
+
 .archive-controls {
   display: flex;
   gap: 16px;

@@ -121,7 +121,11 @@ func run(ctx context.Context) error {
 	motionMgr.Start(ctx)
 
 	// HTTP API и встроенный веб-интерфейс.
-	api := httpapi.NewHandler(pool, cameraRepo, recordingRepo, eventRepo, userRepo, media, tokens, logger)
+	absStorage, err := filepath.Abs(cfg.StoragePath)
+	if err != nil {
+		absStorage = cfg.StoragePath
+	}
+	api := httpapi.NewHandler(pool, cameraRepo, recordingRepo, eventRepo, userRepo, media, tokens, absStorage, logger)
 	
 
 	final := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
