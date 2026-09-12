@@ -25,6 +25,9 @@ const (
 	// «по движению» хранить на диске (3 сегмента по 5 минут = 15 минут).
 	keepBufferSegments = 3
 
+	// motionPreRoll — предзапись клипа относительно кадра-якоря (5 секунд).
+	motionPreRoll = 5 * time.Second
+
 	// clipJobTTL — срок, после которого задача без сегментов помечается failed.
 	clipJobTTL = 2 * time.Hour
 )
@@ -319,7 +322,13 @@ func (s *Scanner) buildClips(ctx context.Context, job domain.ClipJob, segs []dom
 			continue
 		}
 
-		if err := s.clip.Cut(ctx, segRel, offset, duration, clipRel); err != nil {
+		// Привязка по снимку триггера: ищем кадр-якорь в сегменте и режем
+		// относительно него, компенсируя задержку первого ключевого кадра.
+		if job.SnapshotRel != "" {
+			if err := s.clip.CutAnchored(ctx, segRel, job.SnapshotRel, motionPreRoll, duration, offset, clipRel); err != nil {
+				return "", err
+			}
+		} else if err := s.clip.Cut(ctx, segRel, offset, duration, clipRel); err != nil {
 			return "", err
 		}
 
