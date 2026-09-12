@@ -144,3 +144,34 @@ func (r *EventRepository) ListSince(ctx context.Context, since time.Time, limit 
 	}
 	return events, nil
 }
+
+// LatestCameraStates возвращает актуальное состояние камер
+// по последним событиям camera_online / camera_offline.
+func (r *EventRepository) LatestCameraStates(ctx context.Context) (map[uuid.UUID]bool, error) {
+	query := `
+		SELECT DISTINCT ON (camera_id) camera_id, type
+		FROM events
+		WHERE type IN ('camera_online', 'camera_offline')
+		  AND camera_id IS NOT NULL
+		ORDER BY camera_id, occurred_at DESC
+	`
+	rows, err := r.pool.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("query camera states: %w", err)
+	}
+	defer rows.Close()
+
+	states := make(map[uuid.UUID]bool)
+	for rows.Next() {
+		var cameraID uuid.UUID
+		var typ domain.EventType
+		if err := rows.Scan(&cameraID, &typ); err != nil {
+			return nil, fmt.Errorf("scan camera state: %w", err)
+		}
+		states[cameraID] = typ == domain.EventCameraOnline
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate camera states: %w", err)
+	}
+	return states, nil
+}

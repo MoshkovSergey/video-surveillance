@@ -102,6 +102,16 @@ func NewHandler(
 	mux.HandleFunc("PUT /api/v1/settings", h.requireRoles(h.handleUpdateSettings, domain.RoleAdmin))
 	mux.HandleFunc("POST /api/v1/settings/telegram/test", h.requireRoles(h.handleTelegramTest, domain.RoleAdmin))
 
+	// Планы объекта (e-map): просмотр — всем, управление — admin
+	mux.HandleFunc("GET /api/v1/plans", h.requireAuth(h.handleListPlans))
+	mux.HandleFunc("POST /api/v1/plans", h.requireRoles(h.handleCreatePlan, domain.RoleAdmin))
+	mux.HandleFunc("GET /api/v1/plans/{id}", h.requireAuth(h.handleGetPlan))
+	mux.HandleFunc("GET /api/v1/plans/{id}/image", h.requireAuth(h.handleGetPlanImage))
+	mux.HandleFunc("PATCH /api/v1/plans/{id}", h.requireRoles(h.handleRenamePlan, domain.RoleAdmin))
+	mux.HandleFunc("DELETE /api/v1/plans/{id}", h.requireRoles(h.handleDeletePlan, domain.RoleAdmin))
+	mux.HandleFunc("PUT /api/v1/plans/{id}/objects", h.requireRoles(h.handlePutPlanObjects, domain.RoleAdmin))
+	mux.HandleFunc("GET /api/v1/plans/{id}/status", h.requireAuth(h.handlePlanStatus))
+
 	return h.recover(h.logRequests(h.authMiddleware(mux)))
 }
 
