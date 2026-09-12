@@ -153,6 +153,17 @@ func (s *Scanner) scan(ctx context.Context) {
 			continue
 		}
 
+		if n, err := s.repo.DeleteStaleOpenSegments(ctx, cameraID); err != nil {
+			s.logger.Warn("failed to cleanup stale open segments", "camera_id", cameraID, "error", err)
+		} else if n > 0 {
+			s.logger.Info("removed stale open recording rows", "camera_id", cameraID, "count", n)
+		}
+		if n, err := s.repo.DeleteOrphanPaths(ctx, cameraID, paths); err != nil {
+			s.logger.Warn("failed to cleanup orphan recording paths", "camera_id", cameraID, "error", err)
+		} else if n > 0 {
+			s.logger.Info("removed orphan recording rows", "camera_id", cameraID, "count", n)
+		}
+
 		existing = append(existing, paths...)
 	}
 

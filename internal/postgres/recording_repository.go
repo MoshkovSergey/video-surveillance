@@ -185,16 +185,25 @@ func (r *RecordingRepository) ListSourceSegments(ctx context.Context, cameraID u
 	return recordings, nil
 }
 
-// HasOpenOverlapping сообщает, есть ли ещё записываемый сегмент,
-// начавшийся не позже to (для клипа передают момент снимка).
+// HasOpenOverlapping: ждём только если триггер попадает в ТЕКУЩИЙ
+// (самый новый) незакрытый буферный сегмент. Старые open-строки
+// (например после смены формата пути) игнорируются.
 func (r *RecordingRepository) HasOpenOverlapping(ctx context.Context, cameraID uuid.UUID, from, to time.Time) (bool, error) {
 	query := `
 		SELECT EXISTS(
-			SELECT 1 FROM recordings
-			WHERE camera_id = $1
-			  AND ended_at IS NULL
-			  AND started_at <= $3
-			  AND started_at >= ($2::timestamptz - interval '6 hours')
+			SELECT 1 FROM recordings r
+			WHERE r.camera_id = $1
+			  AND r.ended_at IS NULL
+			  AND r.kept = false
+			  AND r.started_at <= $3
+			  AND r.started_at >= ($2::timestamptz - interval '6 hours')
+			  AND r.started_at = (
+				SELECT MAX(r2.started_at)
+				FROM recordings r2
+				WHERE r2.camera_id = $1
+				  AND r2.ended_at IS NULL
+				  AND r2.kept = false
+			  )
 		)
 	`
 	var exists bool
@@ -202,6 +211,45 @@ func (r *RecordingRepository) HasOpenOverlapping(ctx context.Context, cameraID u
 		return false, fmt.Errorf("check open segment: %w", err)
 	}
 	return exists, nil
+}
+
+// DeleteStaleOpenSegments удаляет «зависшие» open-строки, которые не являются
+// самым новым открытым сегментом камеры (дубликаты путей, смена abs/rel).
+func (r *RecordingRepository) DeleteStaleOpenSegments(ctx context.Context, cameraID uuid.UUID) (int64, error) {
+	query := `
+		DELETE FROM recordings r
+		WHERE r.camera_id = $1
+		  AND r.ended_at IS NULL
+		  AND r.kept = false
+		  AND r.started_at < (
+			SELECT MAX(r2.started_at)
+			FROM recordings r2
+			WHERE r2.camera_id = $1
+			  AND r2.ended_at IS NULL
+			  AND r2.kept = false
+		  )
+	`
+	tag, err := r.pool.Exec(ctx, query, cameraID)
+	if err != nil {
+		return 0, fmt.Errorf("delete stale open segments: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
+// DeleteOrphanPaths удаляет метаданные сегментов, которых нет в актуальном
+// списке путей (и abs, и устаревшие relative).
+func (r *RecordingRepository) DeleteOrphanPaths(ctx context.Context, cameraID uuid.UUID, keep []string) (int64, error) {
+	query := `
+		DELETE FROM recordings
+		WHERE camera_id = $1
+		  AND kept = false
+		  AND NOT (storage_path = ANY($2))
+	`
+	tag, err := r.pool.Exec(ctx, query, cameraID, keep)
+	if err != nil {
+		return 0, fmt.Errorf("delete orphan paths: %w", err)
+	}
+	return tag.RowsAffected(), nil
 }
 
 // ListMotionBuffer возвращает завершённые сегменты буфера режима «по движению»,
