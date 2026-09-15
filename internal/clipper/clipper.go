@@ -25,8 +25,11 @@ const (
 //   - локальный: исполняемый файл FFmpeg из переменной FFMPEG_PATH;
 //   - docker: образ CLIPPER_IMAGE (по умолчанию jrottenberg/ffmpeg:latest).
 //
-// Схема реза: одностадийный вызов с перекодированием (не copy),
-// что гарантирует синхронность таймстампов аудио и видео дорожек.
+// Схема реза: одностадийный вызов с перекодированием (не copy).
+// Входной -ss даёт точный поиск с декодированием от ключевого кадра,
+// перекодирование выравнивает таймстампы аудио и видео с нуля —
+// дорожки синхронны. Флаг -copyts НЕ используется: с ним выходная шкала
+// начинается с позиции реза и опция -t останавливает запись до первого кадра.
 type Clipper struct {
 	storageRoot string
 	image       string
@@ -71,20 +74,20 @@ func (c *Clipper) Cut(ctx context.Context, segRel string, offset, duration time.
 		"clip", clipRel,
 	)
 
+	var out string
 	var err error
 	if c.ffmpegPath != "" {
-		err = c.cutLocal(ctx, segRel, offset, duration, clipRel)
+		out, err = c.cutLocal(ctx, segRel, offset, duration, clipRel)
 	} else {
-		err = c.cutDocker(ctx, segRel, offset, duration, clipRel)
+		out, err = c.cutDocker(ctx, segRel, offset, duration, clipRel)
 	}
 	if err != nil {
 		return err
 	}
 
-	hostOut := filepath.Join(c.storageRoot, filepath.FromSlash(clipRel))
-	fi, statErr := os.Stat(hostOut)
+	fi, statErr := os.Stat(out)
 	if statErr != nil || fi.Size() < minClipBytes {
-		return fmt.Errorf("ffmpeg cut: output missing or too small: %s", hostOut)
+		return fmt.Errorf("ffmpeg cut: output missing or too small: %s", out)
 	}
 
 	c.logger.Info("clip cut completed", "clip", clipRel, "size_bytes", fi.Size())
@@ -92,12 +95,10 @@ func (c *Clipper) Cut(ctx context.Context, segRel string, offset, duration time.
 }
 
 // cutArgs формирует аргументы FFmpeg для одностадийного реза с перекодированием.
-// Ключевые параметры синхронизации:
-//   - -ss перед -i: быстрый input seek к ближайшему ключевому кадру;
-//   - перекодирование (libx264 + aac): таймстампы пересчитываются с нуля,
-//     дорожки остаются синхронными;
-//   - -copyts: сохранение оригинальных PTS для точного позиционирования;
-//   - БЕЗ -avoid_negative_ts: этот флаг часто вызывает рассинхронизацию.
+//   - -ss перед -i: точный поиск (декодирование от ключевого кадра до точки);
+//   - -t после -i: ограничение длительности выходной шкалы (начинается с 0);
+//   - перекодирование libx264+aac: таймстампы обеих дорожек стартуют с нуля,
+//     звук и видео синхронны.
 func cutArgs(in, out string, offset, duration time.Duration) []string {
 	return []string{
 		"-y",
@@ -108,14 +109,13 @@ func cutArgs(in, out string, offset, duration time.Duration) []string {
 		"-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
 		"-pix_fmt", "yuv420p",
 		"-c:a", "aac", "-ar", "48000", "-ac", "1", "-b:a", "64k",
-		"-copyts",
 		"-movflags", "+faststart",
 		out,
 	}
 }
 
-// cutLocal кадрирует локальным ffmpeg.exe (одностадийный рез).
-func (c *Clipper) cutLocal(ctx context.Context, segRel string, offset, duration time.Duration, clipRel string) error {
+// cutLocal кадрирует локальным ffmpeg.exe; возвращает путь результата на хосте.
+func (c *Clipper) cutLocal(ctx context.Context, segRel string, offset, duration time.Duration, clipRel string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, cutTimeout)
 	defer cancel()
 
@@ -124,25 +124,28 @@ func (c *Clipper) cutLocal(ctx context.Context, segRel string, offset, duration 
 
 	cmd := exec.CommandContext(ctx, c.ffmpegPath, cutArgs(in, out, offset, duration)...)
 	if o, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("ffmpeg cut: %w: %s", err, tail(o))
+		return "", fmt.Errorf("ffmpeg cut: %w: %s", err, tail(o))
 	}
-	return nil
+	return out, nil
 }
 
-// cutDocker кадрирует в контейнере с образом FFmpeg (одностадийный рез).
-func (c *Clipper) cutDocker(ctx context.Context, segRel string, offset, duration time.Duration, clipRel string) error {
+// cutDocker кадрирует в контейнере с образом FFmpeg; возвращает путь результата на хосте.
+func (c *Clipper) cutDocker(ctx context.Context, segRel string, offset, duration time.Duration, clipRel string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, cutTimeout)
 	defer cancel()
 
 	in := "/data/" + segRel
 	out := "/data/" + clipRel
 
-	args := append([]string{"run", "--rm", "-v", c.storageRoot + ":/data", c.image}, cutArgs(in, out, offset, duration)...)
+	args := append(
+		[]string{"run", "--rm", "-v", c.storageRoot + ":/data", c.image},
+		cutArgs(in, out, offset, duration)...,
+	)
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	if o, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("ffmpeg cut: %w: %s", err, tail(o))
+		return "", fmt.Errorf("ffmpeg cut: %w: %s", err, tail(o))
 	}
-	return nil
+	return filepath.Join(c.storageRoot, filepath.FromSlash(clipRel)), nil
 }
 
 // Snapshot захватывает один кадр из потока sourceURL и сохраняет
